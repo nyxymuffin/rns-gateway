@@ -274,7 +274,12 @@ private:
                      _tcp ? (unsigned)_tcp->tx_frames() : 0);
         }
         _disp.setCursor(0, 44); _disp.print(line);
-        snprintf(line, sizeof(line), "AIR %uk/h SHED %u",
+        // Routing mode on the same line as airtime: "0HOP" = direct RF range
+        // only, "FLOOD" = repeaters relay the tunnel. This is the portal's
+        // "Route tunnel via mesh repeaters" setting as actually loaded, so a
+        // Bluetooth-mode device (no portal) can show whether it persisted.
+        snprintf(line, sizeof(line), "%s AIR %uk/h SHED %u",
+                 _cfg.tunnel_flood ? "FLOOD" : "0HOP",
                  _mc ? (unsigned)(_mc->air_bytes_hour() / 1024) : 0,
                  _mc ? (unsigned)_mc->air_shed() : 0);
         _disp.setCursor(0, 54); _disp.print(line);
