@@ -208,8 +208,27 @@ static void mem_report(const char* tag) {
        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
 }
 
+// The log ring lives in PSRAM and dies with the reboot. A Bluetooth-mode
+// device has no other way to hand over what happened in the field, so the
+// ring is written to flash right before the setup-session reboot and the
+// portal serves it at /lastlog. ~250 KB at SPIFFS speed is a few seconds.
+#define LASTLOG_PATH "/lastlog.txt"
+static void _lastlog_chunk(const char* data, size_t len, void* ctx) {
+  static_cast<File*>(ctx)->write((const uint8_t*)data, len);
+}
+static void save_lastlog() {
+  SPIFFS.remove(LASTLOG_PATH);
+  File f = SPIFFS.open(LASTLOG_PATH, FILE_WRITE);
+  if (!f) { slogln("[log] could not open " LASTLOG_PATH " for write"); return; }
+  slogln("[log] saving log ring to " LASTLOG_PATH " for the setup session's /lastlog");
+  size_t n = slog_ring_for_each(_lastlog_chunk, &f);
+  f.close();
+  slog("[log] saved %u bytes\r\n", (unsigned)n);
+}
+
 static void reboot_into_setup_session(const char* why) {
   slog("[cfg] %s — rebooting into a one-off WiFi setup session (stored config unchanged)\r\n", why);
+  save_lastlog();
   g_setup_boot_flag = SETUP_BOOT_MAGIC;
   delay(300);
   ESP.restart();

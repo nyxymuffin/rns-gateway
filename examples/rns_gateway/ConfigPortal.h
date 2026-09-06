@@ -83,6 +83,9 @@ public:
         // The slog() ring, oldest line first. This is how you read the log
         // without opening the serial port — which resets the board.
         _server.on("/log",    HTTP_GET,  [this]{ handleLog(); });
+        // The PREVIOUS boot's ring, saved to flash on the way into a setup
+        // session: a Bluetooth-mode device's field log, readable afterwards.
+        _server.on("/lastlog", HTTP_GET, [this]{ handleLastLog(); });
 
         // Captive-portal probes. Each OS uses its own URL and decides "this
         // network needs sign-in" from the response; redirecting them all to /
@@ -256,7 +259,9 @@ private:
                                     " (DHCP — prefer the mDNS name above).</p>");
             }
         }
-        _server.sendContent(F("<p class='note'><a href='/log' style='color:#8bd'>View device log</a></p>"));
+        _server.sendContent(F("<p class='note'><a href='/log' style='color:#8bd'>View device log</a>"
+                              " &middot; <a href='/lastlog' style='color:#8bd'>Log from before "
+                              "the PRG reboot</a></p>"));
 
         // ── Client access: WiFi or BLE ──────────────────────────────────────
         _server.sendContent(F("<h2>Client access</h2>"
@@ -540,6 +545,18 @@ private:
         }
         body += F("<p><a href='/' style='color:#8bd'>Back</a></p></body></html>");
         _server.send(200, "text/html", body);
+    }
+
+    void handleLastLog() {
+        if (denied()) return;
+        if (!SPIFFS.exists("/lastlog.txt")) {
+            _server.send(404, "text/plain", "no saved log: hold PRG 10 s on a running device to save one");
+            return;
+        }
+        File f = SPIFFS.open("/lastlog.txt", FILE_READ);
+        if (!f) { _server.send(500, "text/plain", "cannot open saved log"); return; }
+        _server.streamFile(f, "text/plain; charset=utf-8");
+        f.close();
     }
 
     // Serve the slog() ring as plain text. Snapshot under the lock into a

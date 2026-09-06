@@ -38,9 +38,15 @@
 #include <string.h>
 
 #ifndef SLOG_RING_SIZE
-  // 16 KB of PSRAM holds a few minutes of heartbeats plus whatever happened
-  // in between; the portal serves the whole thing in one response.
-  #define SLOG_RING_SIZE 16384
+  // 256 KB of PSRAM: the heartbeat alone is ~300 bytes every 10 s, so 16 KB
+  // held under three minutes — useless for a field run. A quarter megabyte
+  // is about 40 minutes with tunnel chatter, out of 2 MB nobody else uses.
+  // Falls back to SLOG_RING_FALLBACK from internal RAM on a board without
+  // PSRAM.
+  #define SLOG_RING_SIZE 262144
+#endif
+#ifndef SLOG_RING_FALLBACK
+  #define SLOG_RING_FALLBACK 16384
 #endif
 
 // Recursive so a locked helper may call another without deadlocking.
@@ -63,17 +69,19 @@ inline void serial_unlock() {
 
 // ── Log ring ─────────────────────────────────────────────────────────────────
 struct SlogRing {
-    char*    buf;      // SLOG_RING_SIZE bytes, PSRAM when available
+    char*    buf;      // `size` bytes, PSRAM when available
+    size_t   size;     // SLOG_RING_SIZE in PSRAM, SLOG_RING_FALLBACK otherwise
     size_t   head;     // next write position
     size_t   total;    // bytes ever written (min(total, size) are valid)
     uint32_t dropped;  // lines lost because the ring was not allocated
 };
 
 inline SlogRing& _slog_ring() {
-    static SlogRing r = { nullptr, 0, 0, 0 };
+    static SlogRing r = { nullptr, 0, 0, 0, 0 };
     if (!r.buf) {
         r.buf = (char*)heap_caps_malloc(SLOG_RING_SIZE, MALLOC_CAP_SPIRAM);
-        if (!r.buf) r.buf = (char*)malloc(SLOG_RING_SIZE);
+        r.size = SLOG_RING_SIZE;
+        if (!r.buf) { r.buf = (char*)malloc(SLOG_RING_FALLBACK); r.size = SLOG_RING_FALLBACK; }
     }
     return r;
 }
@@ -84,7 +92,7 @@ inline void _slog_ring_put(const char* s, size_t n) {
     if (!r.buf) { r.dropped++; return; }
     for (size_t i = 0; i < n; i++) {
         r.buf[r.head] = s[i];
-        r.head = (r.head + 1) % SLOG_RING_SIZE;
+        r.head = (r.head + 1) % r.size;
     }
     r.total += n;
 }
@@ -104,14 +112,14 @@ inline size_t slog_ring_read(char* out, size_t cap) {
     SlogRing& r = _slog_ring();
     size_t n = 0;
     if (r.buf) {
-        size_t valid = r.total < SLOG_RING_SIZE ? r.total : SLOG_RING_SIZE;
-        size_t start = r.total < SLOG_RING_SIZE ? 0 : r.head;
+        size_t valid = r.total < r.size ? r.total : r.size;
+        size_t start = r.total < r.size ? 0 : r.head;
         if (valid > cap - 1) {           // keep the newest part
-            start = (start + (valid - (cap - 1))) % SLOG_RING_SIZE;
+            start = (start + (valid - (cap - 1))) % r.size;
             valid = cap - 1;
         }
         for (size_t i = 0; i < valid; i++) {
-            out[n++] = r.buf[(start + i) % SLOG_RING_SIZE];
+            out[n++] = r.buf[(start + i) % r.size];
         }
     }
     out[n] = '\0';
@@ -119,7 +127,28 @@ inline size_t slog_ring_read(char* out, size_t cap) {
     return n;
 }
 
-inline size_t slog_ring_capacity() { return SLOG_RING_SIZE; }
+inline size_t slog_ring_capacity() { return _slog_ring().size; }
+
+// Write the ring, oldest first, through `emit` in chunks. Used to persist
+// the ring to flash before a deliberate reboot (see main's setup session),
+// so a Bluetooth-mode device's field log survives to the portal.
+typedef void (*SlogChunkFn)(const char* data, size_t len, void* ctx);
+inline size_t slog_ring_for_each(SlogChunkFn emit, void* ctx) {
+    serial_lock();
+    SlogRing& r = _slog_ring();
+    size_t n = 0;
+    if (r.buf) {
+        size_t valid = r.total < r.size ? r.total : r.size;
+        size_t start = r.total < r.size ? 0 : r.head;
+        // At most two contiguous spans.
+        size_t first = valid;
+        if (start + first > r.size) first = r.size - start;
+        emit(r.buf + start, first, ctx); n += first;
+        if (valid > first) { emit(r.buf, valid - first, ctx); n += valid - first; }
+    }
+    serial_unlock();
+    return n;
+}
 
 // ── Optional line sink ───────────────────────────────────────────────────────
 // A bring-up build can register a sink that receives every line (UDP push,

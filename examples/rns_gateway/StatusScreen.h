@@ -8,6 +8,9 @@
  *                radio params, tunnel TX/RX
  *   2  PEERS   — bound gateways: name, R/E capability, last-heard age
  *   3  TUNNEL  — direct/fallback, throttle drops, queues, heap
+ *   4  BLE     — (Bluetooth mode only) the BLE interface's own counters:
+ *                packets/fragments each way, negotiated MTU, and every
+ *                drop cause, so the link can be judged without a log
  *
  * Plus a SETUP page that takes over while no channel PSK is configured, so
  * a fresh device literally displays its own first-boot instructions.
@@ -92,7 +95,7 @@ public:
         int ev = _btn.check();
         if (ev == BUTTON_EVENT_CLICK) {
             if (_disp.isOn()) {
-                _page = (_page + 1) % PAGE_COUNT;
+                _page = (_page + 1) % pageCount();
             } else {
                 _disp.turnOn();      // wake shows the page you left
             }
@@ -120,7 +123,7 @@ public:
     }
 
 private:
-    static const int PAGE_COUNT = 3;
+    int pageCount() const { return _ble ? 4 : 3; }
 
     void draw(uint32_t now) {
         _disp.startFrame();
@@ -128,7 +131,8 @@ private:
         else if (_cfg.chan_psk[0] == 0) { drawSetup(); }
         else if (_page == 0)       { drawStatus(); }
         else if (_page == 1)       { drawPeers(now); }
-        else                       { drawTunnel(); }
+        else if (_page == 2)       { drawTunnel(); }
+        else                       { drawBle(); }
         _disp.endFrame();
     }
 
@@ -282,6 +286,37 @@ private:
                  _cfg.tunnel_flood ? "FLOOD" : "0HOP",
                  _mc ? (unsigned)(_mc->air_bytes_hour() / 1024) : 0,
                  _mc ? (unsigned)_mc->air_shed() : 0);
+        _disp.setCursor(0, 54); _disp.print(line);
+    }
+
+    // The BLE interface's own bookkeeping. If packets are being lost on the
+    // Bluetooth link, one of the DROP counters says so; if they all stay at
+    // zero while PKT climbs, the link is carrying everything it is given.
+    void drawBle() {
+        drawHeader("BLE");
+        char line[26];
+        if (!_ble) return;
+        char ident[40] = ""; uint16_t mtu = 0; bool hs = false; uint32_t since = 0;
+        bool have = _ble->client_info(0, ident, sizeof(ident), mtu, hs, since);
+        if (have) {
+            snprintf(line, sizeof(line), "CLI %d MTU %u %s",
+                     _ble->clientCount(), (unsigned)mtu, hs ? "HS" : "nohs");
+        } else {
+            snprintf(line, sizeof(line), "CLI 0  %s",
+                     _ble->isStarted() ? "advertising" : "BLE down");
+        }
+        _disp.setCursor(0, 14); _disp.print(line);
+        snprintf(line, sizeof(line), "PKT rx%u tx%u",
+                 (unsigned)_ble->rx_frames(), (unsigned)_ble->tx_frames());
+        _disp.setCursor(0, 24); _disp.print(line);
+        snprintf(line, sizeof(line), "FRG rx%u tx%u",
+                 (unsigned)_ble->rx_fragments(), (unsigned)_ble->tx_fragments());
+        _disp.setCursor(0, 34); _disp.print(line);
+        snprintf(line, sizeof(line), "DROP q%u hs%u rs%u",
+                 (unsigned)_ble->drop_queue_full(), (unsigned)_ble->drop_pre_handshake(),
+                 (unsigned)_ble->drop_reassembly());
+        _disp.setCursor(0, 44); _disp.print(line);
+        snprintf(line, sizeof(line), "DROP tx%u", (unsigned)_ble->drop_tx());
         _disp.setCursor(0, 54); _disp.print(line);
     }
 
