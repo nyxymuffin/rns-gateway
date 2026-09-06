@@ -299,6 +299,9 @@ static void wifi_begin() {
       strlcpy(g_cfg.ap_pwd,  WIFI_AP_PWD,  sizeof(g_cfg.ap_pwd));
     }
     ap = true;
+    g_cfg.ap_enabled = true;   // in memory only: the captive DNS and the
+                               // portal page key off this too; nothing is
+                               // saved unless the user presses Save.
     slog("[wifi] AP '%s' forced on: %s\r\n", g_cfg.ap_ssid,
          g_setup_session ? "setup session needs the portal"
                          : "neither station nor AP was enabled");
