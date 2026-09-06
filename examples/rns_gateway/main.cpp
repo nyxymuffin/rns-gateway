@@ -284,7 +284,25 @@ static char command[160];
 // associated clients are dropped. That is the documented cost of running both.
 static void wifi_begin() {
   const bool sta = g_cfg.sta_enabled && g_cfg.sta_ssid[0];
-  const bool ap  = g_cfg.ap_enabled  && g_cfg.ap_ssid[0];
+  bool ap        = g_cfg.ap_enabled  && g_cfg.ap_ssid[0];
+
+  // A device you cannot reach is not a configuration anyone means to have.
+  // The AP is raised regardless of its checkbox in two cases: a setup
+  // session (the whole point of which is the portal — a Bluetooth device
+  // whose AP had been unticked before switching came back with NO WiFi at
+  // all and could only be reflashed, seen 2026-09-05), and a WiFi-mode
+  // device with neither station nor AP. The stored SSID/password are used
+  // if present, else the build defaults.
+  if (!ap && (g_setup_session || !sta)) {
+    if (!g_cfg.ap_ssid[0]) {
+      strlcpy(g_cfg.ap_ssid, WIFI_AP_SSID, sizeof(g_cfg.ap_ssid));
+      strlcpy(g_cfg.ap_pwd,  WIFI_AP_PWD,  sizeof(g_cfg.ap_pwd));
+    }
+    ap = true;
+    slog("[wifi] AP '%s' forced on: %s\r\n", g_cfg.ap_ssid,
+         g_setup_session ? "setup session needs the portal"
+                         : "neither station nor AP was enabled");
+  }
 
   if (sta && ap) {
     WiFi.mode(WIFI_AP_STA);

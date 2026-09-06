@@ -291,7 +291,10 @@ private:
                _cfg->ap_channel, 1, 13);
         _server.sendContent(F("<p class='note'>One radio: the AP follows the "
                               "station's channel once joined, dropping AP clients "
-                              "when it moves.</p>"));
+                              "when it moves. The AP is raised regardless of this "
+                              "box during a setup session, and whenever neither "
+                              "station nor AP is enabled, so the portal can always "
+                              "be reached.</p>"));
 
         // ── TCP server ──────────────────────────────────────────────────────
         _server.sendContent(F("<h2>RNS TCP server</h2>"));
