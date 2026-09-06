@@ -133,7 +133,17 @@ void MeshCoreInterface::process_outq(uint32_t now) {
                   (unsigned)item.frag.size(), (unsigned long)ts);
             _link.sendChannelText(item.frag.c_str(), ts);
             note_air(item.frag.size() + 32);   // + MeshCore packet framing
-            _next_tx_ms = now + _cfg.fragment_delay_ms;
+            uint32_t gap = _cfg.fragment_delay_ms;
+            uint32_t echo_gap = _link.channelFragAirtimeMs(item.frag.size()) * _cfg.flood_gap_airtimes;
+            if (echo_gap > gap) {
+                if (!_echo_gap_logged) {
+                    INFOF("MeshCoreInterface: flood mode — channel fragment gap %u ms (repeater echo window)",
+                          (unsigned)echo_gap);
+                    _echo_gap_logged = true;
+                }
+                gap = echo_gap;
+            }
+            _next_tx_ms = now + gap;
             return;
         }
 

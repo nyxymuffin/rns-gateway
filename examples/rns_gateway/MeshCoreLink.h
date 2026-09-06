@@ -46,4 +46,16 @@ public:
 
   // Seconds since epoch from MeshCore's RTC, or 0 if the clock is unset.
   virtual uint32_t nowEpoch() = 0;
+
+  // On-air time, in ms, of one CHANNEL fragment of this text length on the
+  // radio's current parameters; 0 when the tunnel is in zero-hop mode (no
+  // repeater echo to clear). The tunnel multiplies it by
+  // Config::flood_gap_airtimes to space fragments past the flood's echo:
+  // every repeater re-transmits a fragment after a random 0-2 airtimes
+  // (Mesh::getRetransmitDelay), and each further hop adds the same again,
+  // so echoes of fragment 0 keep arriving for several airtimes. A second
+  // fragment sent inside that window collides with an echo at the receiver
+  // and both are lost — observed 2026-09-06 as "fragment 0 arrives,
+  // fragment 1 never does", both directions, only with flood on.
+  virtual uint32_t channelFragAirtimeMs(size_t text_len) = 0;
 };

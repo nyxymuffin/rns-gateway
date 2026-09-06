@@ -211,6 +211,7 @@ public:
   bool ensureContact(const uint8_t* pub_key, const char* name) override;
   const char* selfPubKeyHex() override { return _self_pubkey_hex; }
   uint32_t nowEpoch() override;
+  uint32_t channelFragAirtimeMs(size_t text_len) override;
 
   // CommonCLICallbacks
   const char* getFirmwareVer() override { return FIRMWARE_VERSION; }

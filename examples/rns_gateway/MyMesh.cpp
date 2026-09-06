@@ -254,6 +254,15 @@ uint32_t MyMesh::nowEpoch() {
   return getRTCClock()->getCurrentTime();
 }
 
+// See MeshCoreLink::channelFragAirtimeMs. Pure arithmetic on the radio's
+// current parameters — safe to call from the RNS task.
+uint32_t MyMesh::channelFragAirtimeMs(size_t text_len) {
+  if (!_tunnel_flood) return 0;
+  // header + path + channel hash/MAC + timestamp/flags + name prefix + text
+  size_t on_air = 2 + 1 + 3 + 5 + strlen(_prefs.node_name) + 2 + text_len;
+  return _radio->getEstAirtimeFor((int)on_air);
+}
+
 // Drain fragments the RNS task queued for transmission. One per loop keeps a
 // burst from monopolising the mesh loop or the radio.
 void MyMesh::drainTxQueue() {

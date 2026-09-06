@@ -44,7 +44,15 @@ public:
     struct Config {
         const char* name          = "MeshCore";
         uint16_t    payload_size  = 64;
-        uint32_t    fragment_delay_ms = 2500;    // between CHANNEL fragments
+        uint32_t    fragment_delay_ms = 2500;    // between CHANNEL fragments (zero-hop)
+        // Flood mode: gap between CHANNEL fragments in units of one
+        // fragment's airtime (see MeshCoreLink::channelFragAirtimeMs). Each
+        // repeater hop re-transmits after a random 0-2 airtimes plus the
+        // airtime itself, so hop k's echo ends by ~3k airtimes; 12 clears
+        // four hops of echo. On the 62.5 kHz / SF7 preset one fragment is
+        // ~0.5 s, so this is ~6 s per fragment, ~18 s for a 4-fragment
+        // announce. The old fixed 2.5 s sat right in the 2nd/3rd-hop echo.
+        uint8_t     flood_gap_airtimes = 12;
         uint32_t    direct_frag_delay_ms = 500;  // between DIRECT fragments
         uint32_t    fragment_timeout_ms = 300000; // 5 min
         uint32_t    dedup_ttl_ms  = 30000;
@@ -216,6 +224,7 @@ private:
     bool              _got_ack     = false;
     uint32_t          _ack_deadline_ms = 0;
     uint8_t           _cur_attempt = 0;      // DIRECT attempts made for _cur
+    bool              _echo_gap_logged = false;
 
     struct Asm { uint8_t total; uint32_t ts; std::map<uint8_t, std::vector<uint8_t>> frags; };
     std::map<std::string, Asm> _assembly;
