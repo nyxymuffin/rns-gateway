@@ -185,6 +185,10 @@ private:
     void bind_discovery_step(uint32_t now);
     void send_bind(bool is_req);
     std::string resolve_sender_key(const std::string& key_hex);
+    // Set for the duration of a DIRECT rx: the MeshCore key the fragment was
+    // actually decrypted from. learn_token binds to THIS, never to a name
+    // lookup — see the stale-map note there.
+    std::string _direct_sender_key;
 
     Config            _cfg;
     MeshCoreLink&     _link;

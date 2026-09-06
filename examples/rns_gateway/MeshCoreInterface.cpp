@@ -246,6 +246,16 @@ void MeshCoreInterface::handle_bind(const MeshCoreTunnel::BindMsg& b, uint32_t n
     auto it = _peer_table.find(b.sender_name);
     bool changed = (it == _peer_table.end() || it->second != b.mc_pubkey);
     if (changed) {
+        // A known name now has a new key (board re-flashed): every token that
+        // pointed at the old key would otherwise keep sending DIRECT into the
+        // void until each was re-learned. Move them now.
+        if (it != _peer_table.end()) {
+            unsigned moved = 0;
+            for (auto& kv : _rns_to_mc_map)
+                if (kv.second == it->second) { kv.second = b.mc_pubkey; moved++; }
+            WARNINGF("MeshCoreInterface: peer '%s' key changed %.12s... -> %.12s... (RNSBIND), %u tokens moved",
+                     b.sender_name.c_str(), it->second.c_str(), b.mc_pubkey.c_str(), moved);
+        }
         _peer_table[b.sender_name]   = b.mc_pubkey;
         _reverse_peers[b.mc_pubkey]  = b.sender_name;
         for (size_t pfx_len : {8u, 12u, 16u, 24u}) {
@@ -452,7 +462,23 @@ void MeshCoreInterface::on_contact_text(const uint8_t* pub_key, const char* text
     std::string key_hex = to_hex(pub_key, 32);
     std::string sender  = resolve_sender_key(key_hex);
     INFOF("MeshCoreInterface: DIRECT rx from %.12s...", key_hex.c_str());
+
+    // A DIRECT message is peer-encrypted: this key IS the sender, whatever
+    // the name tables say. If the name resolves to a different key, the
+    // tables are stale (a board was re-flashed / renamed) — fix them now.
+    auto pit = _peer_table.find(sender);
+    if (pit != _peer_table.end() && pit->second != key_hex) {
+        WARNINGF("MeshCoreInterface: peer '%s' key changed %.12s... -> %.12s... (DIRECT rx)",
+                 sender.c_str(), pit->second.c_str(), key_hex.c_str());
+        pit->second = key_hex;
+        _reverse_peers[key_hex] = sender;
+        for (size_t pfx_len : {8u, 12u, 16u, 24u})
+            _reverse_peers[key_hex.substr(0, pfx_len)] = sender;
+        mark_state_dirty();
+    }
+    _direct_sender_key = key_hex;
     process_tunnel_text(text, sender);
+    _direct_sender_key.clear();
 }
 
 void MeshCoreInterface::on_direct_ack(uint32_t ack_code) {
@@ -540,14 +566,37 @@ void MeshCoreInterface::process_tunnel_text(const std::string& text, const std::
 void MeshCoreInterface::learn_token(const std::string& sender,
                                     const std::vector<uint8_t>& full) {
     if (sender.empty()) return;
-    auto pit = _peer_table.find(sender);
-    if (pit == _peer_table.end()) return;      // unknown sender — no pubkey to bind
-    const std::string& mc_key = pit->second;
+    // Which MeshCore key does this token belong to? For a DIRECT rx it is the
+    // key the fragment was decrypted from, full stop. Only a CHANNEL rx has to
+    // go through the name table (RNSBIND keeps that current).
+    //
+    // Why this matters: the map is persisted and, until 2026-09-06, a token
+    // was written ONCE and never corrected. Board A carried an entry binding
+    // board B's Reticulum transport identity to a MeshCore key from an earlier
+    // flash of B. Every reply A sent toward the phone went DIRECT to that dead
+    // key, timed out, and the phone gave up — for a whole day, across A's
+    // reboots, with only B connected. A stale mapping now gets replaced the
+    // moment the real sender is seen, and says so in the log.
+    std::string mc_key;
+    if (!_direct_sender_key.empty()) {
+        mc_key = _direct_sender_key;
+    } else {
+        auto pit = _peer_table.find(sender);
+        if (pit == _peer_table.end()) return;  // unknown sender — no pubkey to bind
+        mc_key = pit->second;
+    }
 
     uint8_t tok[MeshCoreTunnel::RNS_DST_LEN];
     if (MeshCoreTunnel::extract_rns_token(full.data(), full.size(), tok)) {
         std::string tok_hex = to_hex(tok, MeshCoreTunnel::RNS_DST_LEN);
-        if (_rns_to_mc_map.find(tok_hex) == _rns_to_mc_map.end()) {
+        auto existing = _rns_to_mc_map.find(tok_hex);
+        if (existing != _rns_to_mc_map.end() && existing->second != mc_key) {
+            WARNINGF("MeshCoreInterface: token %.8s remapped %.12s... -> %.12s... ('%s')",
+                     tok_hex.c_str(), existing->second.c_str(), mc_key.c_str(),
+                     sender.c_str());
+            existing->second = mc_key;
+            mark_state_dirty();
+        } else if (existing == _rns_to_mc_map.end()) {
             if (_rns_to_mc_map.size() >= _RNS_MAP_MAX) {
                 // Trim half (oldest by map order) to bound heap use.
                 size_t drop = _RNS_MAP_MAX / 2;
@@ -603,7 +652,8 @@ void MeshCoreInterface::learn_token(const std::string& sender,
         // us): register with the prop policy too, or the client's reply proof
         // is dropped on its way out. Harmless when prop_only is off.
         _prop.add_link(dig, sizeof(dig));
-        if (_rns_to_mc_map.find(link_hex) == _rns_to_mc_map.end()) {
+        auto lit = _rns_to_mc_map.find(link_hex);
+        if (lit == _rns_to_mc_map.end() || lit->second != mc_key) {
             _rns_to_mc_map[link_hex] = mc_key;
             mark_state_dirty();
             INFOF("MeshCoreInterface: pre-bound link_id %.8s -> '%s'",
