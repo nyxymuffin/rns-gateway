@@ -218,6 +218,16 @@ bool MyMesh::ensureContact(const uint8_t* pub_key, const char* name) {
   TunnelBind b;
   memcpy(b.pub_key, pub_key, PUB_KEY_SIZE);
   StrHelper::strncpy(b.name, name ? name : "", sizeof(b.name));
+  b.reset_path = false;
+  return xQueueSend(_bind_queue, &b, 0) == pdTRUE;
+}
+
+bool MyMesh::resetDirectPath(const uint8_t* pub_key) {
+  if (_bind_queue == NULL) return false;
+  TunnelBind b;
+  memcpy(b.pub_key, pub_key, PUB_KEY_SIZE);
+  b.name[0] = 0;
+  b.reset_path = true;
   return xQueueSend(_bind_queue, &b, 0) == pdTRUE;
 }
 
@@ -231,6 +241,16 @@ void MyMesh::drainBindQueue() {
 
   TunnelBind b;
   if (xQueueReceive(_bind_queue, &b, 0) != pdTRUE) return;
+
+  if (b.reset_path) {
+    ContactInfo* c = lookupContactByPubKey(b.pub_key, PUB_KEY_SIZE);
+    if (c != NULL && c->out_path_len != OUT_PATH_UNKNOWN) {
+      c->out_path_len = OUT_PATH_UNKNOWN;
+      Serial.printf("[bind] path to '%s' forgotten after ACK timeout — next DIRECT flood-routes\n",
+                    c->name);
+    }
+    return;
+  }
 
   if (lookupContactByPubKey(b.pub_key, PUB_KEY_SIZE) != NULL) return;
 

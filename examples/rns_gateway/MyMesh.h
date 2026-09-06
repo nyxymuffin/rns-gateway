@@ -88,10 +88,12 @@ struct TunnelRx {
   char     text[TUNNEL_TEXT_MAX];
 };
 
-// ensureContact request crossing from the RNS task to the mesh task.
+// ensureContact / resetDirectPath request crossing from the RNS task to the
+// mesh task (contacts belong to the mesh task; see MeshCoreLink).
 struct TunnelBind {
   uint8_t pub_key[PUB_KEY_SIZE];
   char    name[32];
+  bool    reset_path;   // true: forget the learned route instead of creating
 };
 
 /**
@@ -198,6 +200,7 @@ public:
   bool sendChannelText(const char* text, uint32_t timestamp) override;
   bool sendDirectText(const uint8_t* pub_key, const char* text, uint32_t timestamp) override;
   bool ensureContact(const uint8_t* pub_key, const char* name) override;
+  bool resetDirectPath(const uint8_t* pub_key) override;
   const char* selfPubKeyHex() override { return _self_pubkey_hex; }
   uint32_t nowEpoch() override;
 

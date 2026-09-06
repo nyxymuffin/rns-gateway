@@ -40,6 +40,18 @@ public:
   // PUB_KEY_SIZE bytes; 'name' is the peer's node name.
   virtual bool ensureContact(const uint8_t* pub_key, const char* name) = 0;
 
+  // Forget the learned MeshCore route to this peer (out_path_len back to
+  // OUT_PATH_UNKNOWN), so the next DIRECT send flood-routes and the ACK
+  // teaches a fresh path. Called when a DIRECT send's ACK times out. Without
+  // it a path learned at close range — an empty path, "direct neighbour" —
+  // is kept for ever: after the devices move apart every direct send is a
+  // zero-hop unicast into nothing, waits the full ACK timeout, then falls
+  // back to the channel, and the tunnel crawls at one timeout per fragment
+  // no matter what the flood setting says. Found 2026-09-05: "works close,
+  // fails far, flood on both ends". MeshCore's companion app resets the
+  // path after failed attempts for the same reason.
+  virtual bool resetDirectPath(const uint8_t* pub_key) = 0;
+
   // Our own MeshCore public key, hex, lowercase — the identity advertised in
   // RNSBIND. Empty until the mesh identity is loaded.
   virtual const char* selfPubKeyHex() = 0;
