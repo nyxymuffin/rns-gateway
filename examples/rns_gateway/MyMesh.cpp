@@ -195,6 +195,7 @@ bool MyMesh::sendChannelText(const char* text, uint32_t timestamp) {
   if (_tx_queue == NULL) return false;
   TunnelTx tx;
   tx.direct = false;
+  tx.attempts = 0;
   memset(tx.pub_key, 0, sizeof(tx.pub_key));
   tx.timestamp = timestamp;
   StrHelper::strncpy(tx.text, text, sizeof(tx.text));
@@ -206,6 +207,7 @@ bool MyMesh::sendDirectText(const uint8_t* pub_key, const char* text, uint32_t t
   if (_tx_queue == NULL) return false;
   TunnelTx tx;
   tx.direct = true;
+  tx.attempts = 0;
   memcpy(tx.pub_key, pub_key, PUB_KEY_SIZE);
   tx.timestamp = timestamp;
   StrHelper::strncpy(tx.text, text, sizeof(tx.text));
@@ -256,6 +258,10 @@ uint32_t MyMesh::nowEpoch() {
 // burst from monopolising the mesh loop or the radio.
 void MyMesh::drainTxQueue() {
   if (_tx_queue == NULL) return;
+  if (_tx_retry_after_ms != 0) {
+    if ((int32_t)(millis() - _tx_retry_after_ms) < 0) return;
+    _tx_retry_after_ms = 0;
+  }
 
   TunnelTx tx;
   if (xQueueReceive(_tx_queue, &tx, 0) != pdTRUE) return;
@@ -278,6 +284,7 @@ void MyMesh::drainTxQueue() {
     uint32_t expected_ack, est_timeout;
     int rc = sendMessage(*c, tx.timestamp, 0, tx.text, expected_ack, est_timeout);
     Serial.printf("[tx] DIRECT rc=%d len=%u\n", rc, (unsigned)strlen(tx.text));
+    if (rc == MSG_SEND_FAILED) retryRefused(tx);
     return;
   }
 
@@ -291,6 +298,26 @@ void MyMesh::drainTxQueue() {
   Serial.printf("[tx] CHANNEL ok=%d name='%s' len=%u ts=%u\n",
                 ok ? 1 : 0, _prefs.node_name, (unsigned)strlen(tx.text),
                 (unsigned)tx.timestamp);
+  if (!ok) retryRefused(tx);
+}
+
+// MeshCore said no (see _chan_refused). Put the fragment back at the head of
+// the queue and try again shortly; give up after a few rounds so a hard
+// failure (text too long) cannot wedge the queue. The fragment's timestamp
+// is unchanged, so the far side sees the same packet id / fragment index.
+void MyMesh::retryRefused(TunnelTx& tx) {
+  _chan_refused++;
+  if (tx.attempts >= 3) {
+    Serial.printf("[tx] giving up after %u attempts\n", (unsigned)tx.attempts);
+    return;
+  }
+  tx.attempts++;
+  if (xQueueSendToFront(_tx_queue, &tx, 0) == pdTRUE) {
+    _chan_retried++;
+    _tx_retry_after_ms = millis() + 400 * tx.attempts;
+  } else {
+    _tx_dropped++;
+  }
 }
 
 // Remember what we put on the channel so the loopback can be dropped. The hash

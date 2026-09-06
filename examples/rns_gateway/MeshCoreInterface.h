@@ -54,7 +54,14 @@ public:
         // Per-destination path-request throttle. The reference default is
         // 1800 s; 0 (always allow) was a bring-up setting and is a hole on a
         // 300 bps channel — a fresh-boot client can storm hundreds of requests.
-        uint32_t    path_req_rate_ms = 1800000;
+        // Was 1800 s (the reference default). On this tunnel a path
+        // response is several channel fragments and losing ONE loses the
+        // answer; the client then retries its request within seconds, and a
+        // 30-minute hold on that retry turned one lost fragment into a
+        // 30-minute outage (observed 2026-09-06: three retries suppressed,
+        // message never sent). One per minute per destination after the
+        // burst is still a hard bound on a 300 bps channel.
+        uint32_t    path_req_rate_ms = 60000;
         uint32_t    path_req_burst_window_ms = 60000;
         uint32_t    path_response_bypass_ms  = 15000;
 
@@ -63,6 +70,11 @@ public:
         bool        can_route    = true;    // advertise R (router) vs E (edge)
         uint32_t    direct_ack_timeout_ms     = 4000;   // min ACK wait
         uint32_t    direct_ack_timeout_max_ms = 8000;   // hard ACK-wait ceiling
+        // DIRECT attempts before a fragment falls back to the channel. The
+        // fallback copy is a broadcast with no ACK; a second acknowledged
+        // attempt is cheaper than losing the packet when the fallback copy
+        // collides (observed 2026-09-06: fragment 1/4 lost exactly that way).
+        uint8_t     direct_attempts = 2;
         uint32_t    peer_ttl_ms  = 86400000;            // 24 h
 
         uint32_t    bitrate       = 300;
@@ -203,6 +215,7 @@ private:
     OutFrag           _cur;                 // in-flight fragment
     bool              _got_ack     = false;
     uint32_t          _ack_deadline_ms = 0;
+    uint8_t           _cur_attempt = 0;      // DIRECT attempts made for _cur
 
     struct Asm { uint8_t total; uint32_t ts; std::map<uint8_t, std::vector<uint8_t>> frags; };
     std::map<std::string, Asm> _assembly;

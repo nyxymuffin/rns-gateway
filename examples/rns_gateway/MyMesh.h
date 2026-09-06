@@ -76,6 +76,7 @@ See [heltec_v4_rns_gateway_base] in variants/heltec_v4/platformio.ini."
 
 struct TunnelTx {
   bool     direct;
+  uint8_t  attempts;                 // send attempts so far (mesh task retries a refusal)
   uint8_t  pub_key[PUB_KEY_SIZE];
   uint32_t timestamp;
   char     text[TUNNEL_TEXT_MAX];
@@ -126,6 +127,13 @@ class MyMesh : public BaseChatMesh, public CommonCLICallbacks, public MeshCoreLi
   QueueHandle_t _rx_queue;   // mesh task -> RNS task (fragments received)
   QueueHandle_t _bind_queue; // RNS task -> mesh task (ensureContact requests)
   uint32_t _tx_dropped, _rx_dropped;
+  // MeshCore refused a send (composeMsgPacket NULL: packet pool exhausted,
+  // text too long, or MSG_SEND_FAILED). Until 2026-09-06 this was one line
+  // on Serial and the fragment was gone — the RNS side had no way to know,
+  // and a packet missing one fragment is a dead packet. Now the fragment is
+  // re-queued (front, so ordering holds) after a short pause, a few times.
+  uint32_t _chan_refused = 0, _chan_retried = 0;
+  uint32_t _tx_retry_after_ms = 0;
   volatile uint32_t _ack_pending;   // set by processAck on the mesh task
 
   // Loop guard. MeshCore can hand our own transmission back through
@@ -140,6 +148,7 @@ class MyMesh : public BaseChatMesh, public CommonCLICallbacks, public MeshCoreLi
   mesh::Packet* createSelfAdvert();
   void joinBridgeChannel();
   void drainTxQueue();
+  void retryRefused(TunnelTx& tx);
   void drainBindQueue();
 
 protected:
@@ -191,6 +200,8 @@ public:
   // Consumes a pending delivery ACK, if one arrived since the last call.
   bool takeAck();
   uint32_t txDropped() const { return _tx_dropped; }
+  uint32_t chanRefused() const { return _chan_refused; }
+  uint32_t chanRetried() const { return _chan_retried; }
   uint32_t rxDropped() const { return _rx_dropped; }
   bool bridgeChannelJoined() const { return _bridge_channel != NULL; }
 

@@ -148,6 +148,7 @@ void MeshCoreInterface::process_outq(uint32_t now) {
         }
         INFOF("MeshCoreInterface: TX DIRECT frag -> %.12s...", item.target_hex.c_str());
         note_air(item.frag.size() + 32);
+        _cur_attempt = 1;
         if (!_link.sendDirectText(pk, item.frag.c_str(), sender_ts())) {
             direct_fallback_to_channel(now);
             return;
@@ -167,6 +168,20 @@ void MeshCoreInterface::process_outq(uint32_t now) {
             return;
         }
         if ((int32_t)(now - _ack_deadline_ms) >= 0) {
+            uint8_t pk[32];
+            if (_cur_attempt < _cfg.direct_attempts &&
+                hex_to_bytes(_cur.target_hex, pk, 32)) {
+                _cur_attempt++;
+                INFOF("MeshCoreInterface: no ACK, DIRECT attempt %u -> %.12s...",
+                      (unsigned)_cur_attempt, _cur.target_hex.c_str());
+                note_air(_cur.frag.size() + 32);
+                if (_link.sendDirectText(pk, _cur.frag.c_str(), sender_ts())) {
+                    uint32_t to = _cfg.direct_ack_timeout_ms;
+                    if (to > _cfg.direct_ack_timeout_max_ms) to = _cfg.direct_ack_timeout_max_ms;
+                    _ack_deadline_ms = now + to;
+                    return;
+                }
+            }
             direct_fallback_to_channel(now);
         }
         return;
