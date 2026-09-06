@@ -547,7 +547,44 @@ void MeshCoreInterface::process_tunnel_text(const std::string& text, const std::
           (unsigned long)hdr.pkt_id, sender.c_str(),
           (unsigned)a.frags.size(), (unsigned)a.total);
 
-    if (a.frags.size() < a.total) return;
+    if (a.frags.size() < a.total) {
+        // Cross-copy completion. A path response is the SAME announce bytes
+        // every time it is re-sent, and a lost fragment leaves a 3-of-4
+        // assembly sitting here for fragment_timeout_ms. When the next copy
+        // arrives under a new packet id and loses a different fragment, the
+        // two copies together are complete. Merge only when the copies
+        // provably carry the same packet: same sender, same fragment count,
+        // and every fragment index they share is byte-identical. Encrypted
+        // payloads never satisfy that by accident; a duplicate path request
+        // merged with its predecessor yields the predecessor, which is
+        // harmless. Observed need 2026-09-06: A's four-fragment answers
+        // reached B as 0,2,3 again and again.
+        const size_t sender_prefix = sender.size() + 1;   // "<sender>\0"
+        for (auto it = _assembly.begin(); it != _assembly.end(); ++it) {
+            if (it->first == key) continue;
+            if (it->first.compare(0, sender_prefix, key, 0, sender_prefix) != 0) continue;
+            Asm& other = it->second;
+            if (other.total != a.total) continue;
+            bool overlap = false, same = true;
+            for (const auto& f : a.frags) {
+                auto o = other.frags.find(f.first);
+                if (o == other.frags.end()) continue;
+                overlap = true;
+                if (o->second != f.second) { same = false; break; }
+            }
+            if (!overlap || !same) continue;
+            size_t before = a.frags.size();
+            for (const auto& f : other.frags)
+                if (!a.frags.count(f.first)) a.frags[f.first] = f.second;
+            if (a.frags.size() > before) {
+                INFOF("MeshCoreInterface: pkt=0x%08lx completed with %u fragment(s) from an earlier copy (%u/%u)",
+                      (unsigned long)hdr.pkt_id, (unsigned)(a.frags.size() - before),
+                      (unsigned)a.frags.size(), (unsigned)a.total);
+            }
+            if (a.frags.size() >= a.total) { _assembly.erase(it); break; }
+        }
+        if (a.frags.size() < a.total) return;
+    }
 
     std::vector<uint8_t> full;
     for (uint8_t i = 0; i < a.total; ++i) {
