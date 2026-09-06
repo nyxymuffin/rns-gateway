@@ -916,7 +916,7 @@ void loop() {
     // coordination — send whenever, read the totals later.
     slog("[hb] ip=%s up=%us sta=%d ap=%d tcpcli=%d tcprx=%u tcptx=%u chan=%d rns_tx=%u rns_rx=%u chan_msgs=%u "
                   "ann_drop=%u ann_heard=%u prq_heard=%u peers=%u routes=%u direct=%u dfall=%u bindtx=%u bindrx=%u "
-                  "outq=%u txdrop=%u rxdrop=%u preset=%u airh=%u airtot=%u shed=%u heap=%u psram=%u\n",
+                  "outq=%u txdrop=%u rxdrop=%u airh=%u airtot=%u shed=%u heap=%u psram=%u\n",
                   _sta_up ? WiFi.localIP().toString().c_str() : "-",
                   now / 1000, _sta_up ? 1 : 0, _ap_up ? 1 : 0,
                   _tcp_impl ? _tcp_impl->clientCount() : 0,
@@ -937,7 +937,6 @@ void loop() {
                   _mc_impl ? _mc_impl->bind_rx() : 0,
                   _mc_impl ? (unsigned)_mc_impl->outq_depth() : 0,
                   the_mesh.txDropped(), the_mesh.rxDropped(),
-                  _mc_impl ? _mc_impl->path_resets() : 0,
                   _mc_impl ? _mc_impl->air_bytes_hour() : 0,
                   _mc_impl ? _mc_impl->air_bytes_total() : 0,
                   _mc_impl ? _mc_impl->air_shed() : 0,

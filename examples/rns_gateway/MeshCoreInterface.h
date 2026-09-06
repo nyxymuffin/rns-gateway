@@ -110,7 +110,6 @@ public:
     // Announces / path requests heard from the mesh that pre-marked our own
     // throttles (cross-gateway dedup; see note_heard_on_mesh).
     uint32_t    announce_heard() const { return _announce_heard; }
-    uint32_t    path_resets() const { return _path_resets; }
     uint32_t    path_req_heard() const { return _path_req_heard; }
     size_t      outq_depth()     const { return _outq.size(); }
     size_t      peer_count()     const { return _peer_table.size(); }
@@ -227,7 +226,6 @@ private:
     uint32_t          _chan_msgs = 0;
     uint32_t          _announce_suppressed = 0;
     uint32_t          _announce_heard = 0;
-    uint32_t          _path_resets = 0;
     uint32_t          _path_req_heard = 0;
     uint32_t          _direct_tx_frames = 0;
     uint32_t          _direct_fallbacks = 0;

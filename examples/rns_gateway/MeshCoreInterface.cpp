@@ -167,14 +167,6 @@ void MeshCoreInterface::process_outq(uint32_t now) {
             return;
         }
         if ((int32_t)(now - _ack_deadline_ms) >= 0) {
-            // No ACK: the route MeshCore has for this peer no longer works
-            // (typically an empty "direct neighbour" path learned at close
-            // range). Forget it so the next DIRECT send flood-routes and the
-            // ACK re-teaches a real path; then fall back for this fragment.
-            uint8_t pk[32];
-            if (hex_to_bytes(_cur.target_hex, pk, 32) && _link.resetDirectPath(pk)) {
-                _path_resets++;
-            }
             direct_fallback_to_channel(now);
         }
         return;
