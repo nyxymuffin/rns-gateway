@@ -527,7 +527,7 @@ private:
             body += F("<h2>Clock not set</h2><p>No command relay.</p>");
         } else {
             char cmd[32];
-            snprintf(cmd, sizeof(cmd), "time %lu", epoch);
+            snprintf(cmd, sizeof(cmd), "settime %lu", epoch);
             if (_run_cmd(cmd)) {
                 slog("[portal] clock set from browser: %lu\r\n", epoch);
                 body += F("<h2>Clock set</h2><p>Device time updated.</p>");

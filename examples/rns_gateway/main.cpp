@@ -605,11 +605,15 @@ static void rns_task(void* arg) {
     if (ntp_started && !ntp_applied) {
       time_t t = time(nullptr);
       if (t > 1700000000) {           // SNTP has answered (after Nov 2023)
+        // `settime`, not the CLI's `time`: on the V4 the RTC IS the system
+        // clock SNTP just set, so `time` would be refused as "backwards" a
+        // second later; on a board with a real RTC chip (T-Beam Supreme)
+        // the chip still needs writing. settime applies only if different.
         char c[32];
-        snprintf(c, sizeof(c), "time %lu", (unsigned long)t);
+        snprintf(c, sizeof(c), "settime %lu", (unsigned long)t);
         if (portal_run_command(c)) {
           ntp_applied = true;
-          slog("[clock] NTP: setting RTC to %lu\r\n", (unsigned long)t);
+          slog("[clock] NTP: %lu\r\n", (unsigned long)t);
         }
       }
     }
@@ -843,7 +847,25 @@ void loop() {
     char cmd[sizeof(_cmd_req)], reply[160];
     strlcpy(cmd, _cmd_req, sizeof(cmd));
     reply[0] = 0;
-    the_mesh.handleCommand(0, cmd, reply);
+    if (strncmp(cmd, "settime ", 8) == 0) {
+      // Authoritative time (NTP, or the user's browser): set the RTC
+      // outright if it differs by more than a few seconds. The CLI's
+      // `time` refuses to move backwards, a guard against untrusted
+      // sender timestamps that does not apply here.
+      uint32_t want = (uint32_t)strtoul(cmd + 8, nullptr, 10);
+      uint32_t have = rtc_clock.getCurrentTime();
+      int32_t  diff = (int32_t)(want - have);
+      if (diff > 5 || diff < -5) {
+        rtc_clock.setCurrentTime(want);
+        snprintf(reply, sizeof(reply), "RTC %lu -> %lu (%+ld s)",
+                 (unsigned long)have, (unsigned long)want, (long)diff);
+      } else {
+        snprintf(reply, sizeof(reply), "RTC already %lu (within %+ld s)",
+                 (unsigned long)have, (long)diff);
+      }
+    } else {
+      the_mesh.handleCommand(0, cmd, reply);
+    }
     slog("[cfg] %s -> %s\r\n", cmd, reply[0] ? reply : "(no reply)");
     _cmd_req_pending = false;
   }
