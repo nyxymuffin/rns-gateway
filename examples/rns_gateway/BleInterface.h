@@ -356,8 +356,18 @@ public:
         }
     }
 
+    // MUST be stable for the life of the interface. microReticulum's
+    // Interface::get_hash() is Identity::full_hash(toString()), recomputed on
+    // every call, and Transport stores that hash in its path tables to find
+    // "the interface this announce arrived on". This string used to include
+    // the advertised device name, which is empty at registration and set in
+    // start() — so the hash changed underneath Transport, every lookup
+    // failed ("Path Interface … not found"), and no announce that arrived
+    // over BLE was ever re-broadcast to the mesh. Found 2026-09-05 from a
+    // /lastlog of the phone's manual announce. TcpInterface never had this:
+    // its string is fixed at construction.
     virtual inline std::string toString() const override {
-        return "BleInterface[" + _name + "/" + _dev_name + "]";
+        return "BleInterface[" + _name + "]";
     }
 
     // ─── Diagnostics ─────────────────────────────────────────────────────────
