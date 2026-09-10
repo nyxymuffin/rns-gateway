@@ -1,16 +1,21 @@
 # First-time setup
 
-Two variants ship as prebuilt images. They are the same firmware with
+Three variants ship as prebuilt images for two boards (Heltec WiFi LoRa 32
+V4 and LilyGo T-Beam Supreme SX1262). They are the same firmware with
 different first-boot identities, so two gateways in one household never
 collide:
 
-| | Stationary | Mobile |
-|---|---|---|
-| Intended life | Lives at a site, usually joined to a local network | Travels; serves clients from its own AP |
-| Setup AP | `RNSGateway-Stationary` | `RNSGateway-Mobile` |
-| Hostname | `rnsgateway-stationary.local` | `rnsgateway-mobile.local` |
-| Mesh node name | `RNS GW Stationary` | `RNS GW Mobile` |
-| Status | Released | **Preview — not yet field-validated** |
+| | Stationary | Mobile WiFi | Mobile BLE |
+|---|---|---|---|
+| Intended life | Lives at a site, usually joined to a local network | Travels; serves clients from its own AP | Travels with a phone; clients connect over Bluetooth |
+| Setup AP | `RNSGateway-Stationary` | `RNSGateway-Mobile` | `RNSGateway-BLE` |
+| Hostname | `rnsgateway-stationary.local` | `rnsgateway-mobile.local` | `rnsgateway-ble.local` (setup session only) |
+| Mesh node name | `RNS GW Stationary` | `RNS GW Mobile` | `RNS GW BLE` |
+| Status | Released | **Preview** | **Preview** (iOS validated, Android not yet) |
+
+Every setting mentioned below is described in full in the
+[Configuration reference](CONFIGURATION.md). Bluetooth specifics are in
+[Bluetooth LE client access](BLE_CLIENT_ACCESS.md).
 
 Hardware: Heltec WiFi LoRa 32 **V4** (ESP32-S3 + SX1262). Power from a good
 5 V / 2 A USB supply — WiFi + LoRa transmit spikes brown out weak supplies
@@ -20,11 +25,11 @@ node actually runs on it for 10+ minutes before trusting it.
 
 ## 1. Flash
 
-Download the image for your variant from the releases page and flash it at
-offset **0**:
+Download the image for your variant and board from the releases page and
+flash it at offset **0**:
 
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 rns-gateway-stationary-v0.1.0.bin
+esptool.py --chip esp32s3 write_flash 0x0 rns-gateway-stationary-heltec_v4-v0.1.0.bin
 ```
 
 (Any ESP32 web flasher works too — single file, offset 0x0.)
@@ -36,7 +41,7 @@ or closing a USB serial connection **reboots it** — that's normal.
 
 The gateway boots as a WiFi access point:
 
-1. Join the network `RNSGateway-Stationary` (or `-Mobile`).
+1. Join the network `RNSGateway-Stationary` (or `-Mobile`, `-BLE`).
    Password: `rnsgateway`
 2. A captive portal should open; if not, browse to `http://192.168.4.1/`.
    Log in as user `admin`, password `password`.
@@ -120,7 +125,15 @@ both. Notes:
   route around your mesh — everything still works, but the tunnel carries
   nothing and proves nothing.
 
-## Mobile only
+## Mobile BLE only
+
+A Bluetooth device has no portal, so it boots into a WiFi setup session
+until a channel PSK is saved. Set the PSK and the clock (Clock section,
+*Set clock from this browser*), then Save & reboot. From then on it runs
+with WiFi off. To get the portal back, hold PRG for ten seconds and
+release. See [Bluetooth LE client access](BLE_CLIENT_ACCESS.md).
+
+## Mobile WiFi only
 
 Mobile is AP-only by design: its clients join `RNSGateway-Mobile` and reach
 the portal/TCP server at `192.168.4.1` (or the hostname). There is nothing
@@ -152,4 +165,5 @@ create exactly the route-around-the-mesh situation described above.
 | Client app keeps disconnecting | Gateway drops silent clients after 10 min; healthy apps reconnect automatically. Persistent flapping usually means weak WiFi to the AP. |
 | Messages stopped after a reboot | Wait ~1 min for path re-convergence; send again. |
 | Node reboots randomly on battery | It's the power supply, not the software — see the note at the top. |
+| Bluetooth device, need the portal | Hold PRG 10 s, release. Releasing between 5 and 10 s powers it off instead. |
 | Portal password forgotten | Factory reset in the portal you can't reach is no help — hold-erase reflash via USB (`esptool.py erase_flash`, then reflash) returns everything to defaults. |

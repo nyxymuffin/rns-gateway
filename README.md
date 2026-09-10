@@ -110,6 +110,10 @@ exchange per active destination, throttled as above.
 
 ## Getting started
 
+Docs: [First-time setup](docs/FIRST_TIME_SETUP.md) ·
+[Configuration reference](docs/CONFIGURATION.md) ·
+[Bluetooth LE client access](docs/BLE_CLIENT_ACCESS.md)
+
 Prebuilt images are on the [releases page](../../releases) — **Stationary**
 (site gateway) and **Mobile** (AP-only, travels; currently a preview). Flash
 at offset 0 with esptool, then:

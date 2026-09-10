@@ -17,7 +17,9 @@ This is the MeshCore fork hosting the RNS gateway role. All work happens in
   TcpInterface, BleInterface + BleFragmentation, ConfigPortal, GatewayConfig,
   SerialLog, StatusScreen)
 - Host tests: `./scripts/run_host_tests.sh` (no hardware needed)
-- Spec: `../FORK_BRIEF.md`; BLE client access: `docs/BLE_CLIENT_ACCESS.md`
+- Spec: `../FORK_BRIEF.md`; user docs: `docs/FIRST_TIME_SETUP.md`,
+  `docs/CONFIGURATION.md` (settings reference — update when GatewayConfig
+  or the portal changes), `docs/BLE_CLIENT_ACCESS.md`
 
 ## Client access: WiFi or BLE (either/or)
 - Portal setting `client_access` (GatewayConfig). BLE mode never starts
