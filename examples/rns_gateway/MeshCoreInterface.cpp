@@ -49,6 +49,9 @@ MeshCoreInterface::MeshCoreInterface(MeshCoreLink& link, const Config& cfg)
 MeshCoreInterface::~MeshCoreInterface() {}
 
 bool MeshCoreInterface::start() {
+    // GRP_DATA v1 is channel-only (docs/GRP_DATA_TUNNEL.md section 4).
+    if (_cfg.grp_data) _cfg.allow_direct = false;
+
     const char* pk = _link.selfPubKeyHex();
     _own_pubkey_hex = pk ? pk : "";
     _have_pubkey = !_own_pubkey_hex.empty();
@@ -126,6 +129,16 @@ void MeshCoreInterface::process_outq(uint32_t now) {
         _outq.pop_front();
         _cur = item;
         _got_ack = false;
+
+        if (item.mode == TX_CHANNEL_DATA) {
+            INFOF("MeshCoreInterface: TX channel data (%u bytes)", (unsigned)item.frag.size());
+            _link.sendChannelData(reinterpret_cast<const uint8_t*>(item.frag.data()), item.frag.size());
+            note_air(item.frag.size() + 32);   // + MeshCore packet framing
+            uint32_t gap = _cfg.fragment_delay_ms;
+            uint32_t echo_gap = _link.channelDataAirtimeMs(item.frag.size()) * _cfg.flood_gap_airtimes;
+            _next_tx_ms = now + (echo_gap > gap ? echo_gap : gap);
+            return;
+        }
 
         if (item.mode == TX_CHANNEL) {
             uint32_t ts = sender_ts();
@@ -215,6 +228,7 @@ void MeshCoreInterface::direct_fallback_to_channel(uint32_t now) {
 
 void MeshCoreInterface::send_bind(bool is_req) {
     if (!_have_pubkey) return;
+    if (_cfg.grp_data) { send_bind_data(is_req); return; }
     std::string text = MeshCoreTunnel::encode_bind(
         _own_pubkey_hex, _cfg.can_route, is_req);
     // Same outq as RNS frags — never bypass the TX state machine / pile onto
@@ -369,8 +383,10 @@ bool MeshCoreInterface::send_outgoing(const RNS::Bytes& data) {
     }
 
     {
-        uint8_t total_est = MeshCoreTunnel::fragment_count(len, _cfg.payload_size);
-        size_t est_bytes = (size_t)total_est * (_cfg.payload_size + 46);
+        uint8_t total_est = _cfg.grp_data ? MeshCoreTunnel::grpdata::fragmentCount(len)
+                                          : MeshCoreTunnel::fragment_count(len, _cfg.payload_size);
+        size_t est_bytes = (size_t)total_est *
+            (_cfg.grp_data ? MeshCoreTunnel::grpdata::kMaxBody + 32 : _cfg.payload_size + 46);
         if (!air_budget_ok(p[0] & 0x03, (p[0] >> 2) & 0x03, est_bytes)) {
             return false;
         }
@@ -384,7 +400,13 @@ bool MeshCoreInterface::send_outgoing(const RNS::Bytes& data) {
         return false;
     }
 
-    uint8_t total = MeshCoreTunnel::fragment_count(len, _cfg.payload_size);
+    uint8_t total = _cfg.grp_data ? MeshCoreTunnel::grpdata::fragmentCount(len)
+                                  : MeshCoreTunnel::fragment_count(len, _cfg.payload_size);
+    if (_cfg.grp_data && !_have_pubkey) {
+        // GRP_DATA fragments carry our key prefix as the sender (spec 2.1).
+        WARNING("MeshCoreInterface: no mesh identity yet — dropping packet");
+        return false;
+    }
     if (total == 0) {
         HEAD("MeshCoreInterface: packet too large for fragment encoding", RNS::LOG_ERROR);
         return false;
@@ -410,10 +432,13 @@ bool MeshCoreInterface::send_outgoing(const RNS::Bytes& data) {
         }
     }
 
-    uint32_t id = _pkt_id;
-    _pkt_id = (_pkt_id + 1) & 0xFFFFFFFF;
-
-    enqueue_packet(p, len, id, mode, target_hex);
+    if (_cfg.grp_data) {
+        enqueue_packet_data(p, len);
+    } else {
+        uint32_t id = _pkt_id;
+        _pkt_id = (_pkt_id + 1) & 0xFFFFFFFF;
+        enqueue_packet(p, len, id, mode, target_hex);
+    }
     _rns_tx_packets++;
     INFOF("MeshCoreInterface: queued %s %u bytes -> %u frags [%s] (outq=%u)",
           MeshCoreTunnel::packet_kind(p[0]), (unsigned)len, (unsigned)total,
@@ -441,7 +466,90 @@ void MeshCoreInterface::enqueue_packet(const uint8_t* data, size_t len, uint32_t
 // Inbound path
 // ─────────────────────────────────────────────────────────────────────────
 
+void MeshCoreInterface::enqueue_packet_data(const uint8_t* data, size_t len) {
+    uint8_t sender[MeshCoreTunnel::grpdata::kSenderPrefix];
+    if (!hex_to_bytes(_own_pubkey_hex.substr(0, 2 * sizeof(sender)), sender, sizeof(sender))) return;
+    // Random per packet (spec 2.1): a counter would restart at 0 after a reboot
+    // and collide with ids the far side still holds in its dedup window.
+    const uint32_t pkt_id = esp_random();
+    const uint8_t total = MeshCoreTunnel::grpdata::fragmentCount(len);
+    uint8_t body[MeshCoreTunnel::grpdata::kMaxBody];
+    for (uint8_t idx = 0; idx < total; ++idx) {
+        size_t n = MeshCoreTunnel::grpdata::encodeFragment(sender, pkt_id, idx, data, len, body, sizeof(body));
+        if (n == 0) continue;
+        _outq.push_back(OutFrag{TX_CHANNEL_DATA, std::string(),
+                                std::string(reinterpret_cast<const char*>(body), n)});
+    }
+}
+
+void MeshCoreInterface::send_bind_data(bool is_req) {
+    MeshCoreTunnel::grpdata::Bind bind;
+    if (!hex_to_bytes(_own_pubkey_hex, bind.publicKey, sizeof(bind.publicKey))) return;
+    bind.request = is_req;
+    bind.router = _cfg.can_route;
+    const char* name = _link.selfName();
+    size_t name_len = name ? strnlen(name, MeshCoreTunnel::grpdata::kMaxNameBytes) : 0;
+    bind.nameLength = (uint8_t)name_len;
+    if (name_len) memcpy(bind.name, name, name_len);
+    uint8_t body[MeshCoreTunnel::grpdata::kMaxBody];
+    size_t n = MeshCoreTunnel::grpdata::encodeBind(bind, body, sizeof(body));
+    if (n == 0) return;
+    if (_outq.size() >= _cfg.max_outq) {
+        WARNING("MeshCoreInterface: outq full — dropping bind");
+        return;
+    }
+    _outq.push_back(OutFrag{TX_CHANNEL_DATA, std::string(),
+                            std::string(reinterpret_cast<const char*>(body), n)});
+    _bind_tx++;
+    INFOF("MeshCoreInterface: queued GRP_DATA %s cap=%c (outq=%u)",
+          is_req ? "bind request" : "bind", _cfg.can_route ? 'R' : 'E', (unsigned)_outq.size());
+}
+
+std::string MeshCoreInterface::data_peer_label(const std::string& name, const std::string& key_hex) {
+    std::string prefix = key_hex.substr(0, 8);
+    return name.empty() ? prefix : name + "#" + prefix;
+}
+
+void MeshCoreInterface::on_channel_data(const uint8_t* body, size_t len) {
+    if (!_cfg.grp_data) return;   // this channel carries the text format
+    using namespace MeshCoreTunnel::grpdata;
+    Kind kind;
+    if (!kindOf(body, len, kind)) {
+        WARNINGF("MeshCoreInterface: GRP_DATA unknown kind 0x%02x (%u bytes) dropped",
+                 len ? body[0] : 0, (unsigned)len);
+        return;
+    }
+    if (kind == Kind::Fragment) {
+        Fragment f;
+        if (!decodeFragment(body, len, f)) {
+            WARNINGF("MeshCoreInterface: GRP_DATA malformed fragment (%u bytes)", (unsigned)len);
+            return;
+        }
+        _chan_msgs++;
+        // Sender is a key prefix; RNSBIND-style Binds map it to a peer label.
+        std::string sender = resolve_sender_key(to_hex(f.sender, sizeof(f.sender)));
+        MeshCoreTunnel::FragHeader hdr;
+        hdr.frag_idx = f.index;
+        hdr.pkt_id = f.packetId;
+        hdr.frag_total = f.total;
+        process_fragment(hdr, std::vector<uint8_t>(f.payload, f.payload + f.payloadLength), sender);
+        return;
+    }
+    Bind bind;
+    if (!decodeBind(body, len, bind)) {
+        WARNINGF("MeshCoreInterface: GRP_DATA malformed bind (%u bytes)", (unsigned)len);
+        return;
+    }
+    MeshCoreTunnel::BindMsg b;
+    b.is_req = bind.request;
+    b.mc_pubkey = to_hex(bind.publicKey, sizeof(bind.publicKey));
+    b.sender_name = data_peer_label(bind.name, b.mc_pubkey);
+    b.can_route = bind.router;
+    handle_bind(b, millis());
+}
+
 void MeshCoreInterface::on_channel_text(const char* text_c, uint32_t timestamp) {
+    if (_cfg.grp_data) return;    // this channel carries the GRP_DATA format
     std::string text(text_c);
 
     // Bring-up visibility: show the verbatim on-wire text. MeshCore firmware
@@ -481,6 +589,7 @@ void MeshCoreInterface::on_channel_text(const char* text_c, uint32_t timestamp) 
 }
 
 void MeshCoreInterface::on_contact_text(const uint8_t* pub_key, const char* text_c, uint32_t timestamp) {
+    if (_cfg.grp_data) return;    // GRP_DATA v1 has no direct leg
     std::string text(text_c);
     if (text.rfind(MeshCoreTunnel::MSG_PREFIX, 0) != 0) return;   // not a tunnel fragment
 
@@ -518,7 +627,14 @@ void MeshCoreInterface::process_tunnel_text(const std::string& text, const std::
                  sender.c_str(), (unsigned)text.size());
         return;
     }
+    process_fragment(hdr, std::move(chunk), sender);
+}
 
+// Reassembly shared by both tunnel formats: text fragments and GRP_DATA
+// fragments (docs/GRP_DATA_TUNNEL.md 2.1) are keyed by sender + pkt_id alike.
+void MeshCoreInterface::process_fragment(const MeshCoreTunnel::FragHeader& hdr,
+                                         std::vector<uint8_t> chunk,
+                                         const std::string& sender) {
     std::string key = sender;
     key.push_back('\0');
     key.append(reinterpret_cast<const char*>(&hdr.pkt_id), sizeof(hdr.pkt_id));

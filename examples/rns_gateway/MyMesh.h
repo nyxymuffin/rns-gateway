@@ -74,9 +74,13 @@ See [heltec_v4_rns_gateway_base] in variants/heltec_v4/platformio.ini."
 #define TUNNEL_TEXT_MAX   176
 #define TUNNEL_QUEUE_DEPTH 12
 
+// data_len > 0 marks a GRP_DATA tunnel body (docs/GRP_DATA_TUNNEL.md): `text`
+// then holds data_len raw bytes (at most 165, MAX_GROUP_DATA_LENGTH), not a
+// C string. data_len == 0 is the original text fragment.
 struct TunnelTx {
   bool     direct;
   uint8_t  attempts;                 // send attempts so far (mesh task retries a refusal)
+  uint8_t  data_len;
   uint8_t  pub_key[PUB_KEY_SIZE];
   uint32_t timestamp;
   char     text[TUNNEL_TEXT_MAX];
@@ -84,6 +88,7 @@ struct TunnelTx {
 
 struct TunnelRx {
   bool     direct;
+  uint8_t  data_len;
   uint8_t  pub_key[PUB_KEY_SIZE];
   uint32_t timestamp;
   char     text[TUNNEL_TEXT_MAX];
@@ -158,6 +163,8 @@ protected:
   // direct-routed fragments. The rest are required by the base class and unused.
   void onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t timestamp, const char* text) override;
   void onMessageRecv(const ContactInfo& contact, mesh::Packet* pkt, uint32_t sender_timestamp, const char* text) override;
+  void onChannelDataRecv(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint16_t data_type,
+                         const uint8_t* data, size_t data_len) override;
   void onDiscoveredContact(ContactInfo& contact, bool is_new, uint8_t path_len, const uint8_t* path) override { }
   ContactInfo* processAck(const uint8_t* data) override;
   void onContactPathUpdated(const ContactInfo& contact) override { }
@@ -212,6 +219,9 @@ public:
   const char* selfPubKeyHex() override { return _self_pubkey_hex; }
   uint32_t nowEpoch() override;
   uint32_t channelFragAirtimeMs(size_t text_len) override;
+  bool sendChannelData(const uint8_t* body, size_t len) override;
+  uint32_t channelDataAirtimeMs(size_t body_len) override;
+  const char* selfName() override { return _prefs.node_name; }
 
   // CommonCLICallbacks
   const char* getFirmwareVer() override { return FIRMWARE_VERSION; }

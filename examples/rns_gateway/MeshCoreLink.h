@@ -58,4 +58,15 @@ public:
   // and both are lost — observed 2026-09-06 as "fragment 0 arrives,
   // fragment 1 never does", both directions, only with flood on.
   virtual uint32_t channelFragAirtimeMs(size_t text_len) = 0;
+
+  // ── GRP_DATA tunnel format (docs/GRP_DATA_TUNNEL.md) ───────────────────
+  // Broadcast one GRP_DATA tunnel body (1..165 bytes) on the bridge channel,
+  // with data_type GrpDataType::RnsTunnel. Same queueing as sendChannelText.
+  virtual bool sendChannelData(const uint8_t* body, size_t len) = 0;
+
+  // As channelFragAirtimeMs, for a GRP_DATA body of this length.
+  virtual uint32_t channelDataAirtimeMs(size_t body_len) = 0;
+
+  // Our MeshCore node name, carried in GRP_DATA Bind messages.
+  virtual const char* selfName() = 0;
 };

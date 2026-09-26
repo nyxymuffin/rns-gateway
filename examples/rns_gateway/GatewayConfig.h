@@ -67,6 +67,9 @@
 #ifndef RNS_GW_CLIENT_ACCESS
   #define RNS_GW_CLIENT_ACCESS  CLIENT_ACCESS_WIFI
 #endif
+// Tunnel wire format on the bridge channel. Both ends of a channel must agree.
+#define TUNNEL_FORMAT_TEXT  0     // "RNS:<base64url>" GRP_TXT (Python reference)
+#define TUNNEL_FORMAT_DATA  1     // GRP_DATA, docs/GRP_DATA_TUNNEL.md (Ratspeak handheld)
 
 struct GatewayConfig {
     // ── Client access selector ──────────────────────────────────────────────
@@ -122,6 +125,9 @@ struct GatewayConfig {
     // Aggregate tunnel airtime budget, KB per rolling hour (0 = unlimited).
     // Sheds announces/path-requests above 80%, everything at 100%.
     uint32_t air_budget_kb_h;
+    // TUNNEL_FORMAT_TEXT (default, the existing format) or TUNNEL_FORMAT_DATA.
+    // Takes effect after a reboot, like every tunnel setting.
+    uint8_t  tunnel_format;
 
     // ── MeshCore bridge channel ─────────────────────────────────────────────
     // Index 0 is MeshCore public and takes no private PSK; a private tunnel
@@ -158,6 +164,7 @@ struct GatewayConfig {
         prop_dests[0]   = 0;
         tunnel_flood    = false;
         air_budget_kb_h = 60;   // ~45% of the theoretical 300 bit/s hour
+        tunnel_format   = TUNNEL_FORMAT_TEXT;
 
         strlcpy(chan_name, BRIDGE_CHANNEL_NAME, sizeof(chan_name));
         strlcpy(chan_psk,  BRIDGE_CHANNEL_PSK,  sizeof(chan_psk));
@@ -215,6 +222,8 @@ struct GatewayConfig {
         strlcpy(prop_dests, doc["prop_dests"] | prop_dests, sizeof(prop_dests));
         tunnel_flood    = doc["tunnel_flood"]    | tunnel_flood;
         air_budget_kb_h = doc["air_budget_kb_h"] | air_budget_kb_h;
+        tunnel_format   = doc["tunnel_format"]   | tunnel_format;
+        if (tunnel_format != TUNNEL_FORMAT_DATA) tunnel_format = TUNNEL_FORMAT_TEXT;
 
         strlcpy(chan_name, doc["chan_name"] | chan_name, sizeof(chan_name));
         strlcpy(chan_psk,  doc["chan_psk"]  | chan_psk,  sizeof(chan_psk));
@@ -243,6 +252,7 @@ struct GatewayConfig {
         doc["prop_dests"]   = prop_dests;
         doc["tunnel_flood"] = tunnel_flood;
         doc["air_budget_kb_h"] = air_budget_kb_h;
+        doc["tunnel_format"] = tunnel_format;
         doc["chan_name"]    = chan_name;
         doc["chan_psk"]     = chan_psk;
 

@@ -168,6 +168,7 @@ alone unless you understand the cost.
 
 | Field | Default | Range | What it does |
 |---|---|---|---|
+| Tunnel format | Text | Text or GRP_DATA | How RNS packets are framed on the bridge channel. Text is the original `RNS:<base64url>` channel-message format, compatible with the Python reference. GRP_DATA is the binary format in [GRP_DATA_TUNNEL.md](GRP_DATA_TUNNEL.md), used by the Ratspeak handheld: about twice the payload per fragment, channel only (no direct leg yet). Every node on the channel must use the same format; each ignores the other's traffic. Stored as `tunnel_format` (0 text, 1 GRP_DATA). |
 | Path-request throttle, seconds per destination | 1800 | 0 to 86400 | Minimum interval between path requests for the same destination. 0 disables the throttle, which lets a freshly booted client storm hundreds of requests onto the channel. Bring-up only. |
 | Announce throttle, seconds per destination | 600 | 0 to 86400 | Minimum interval between rebroadcasts of the same destination's announce. Lower it to reconverge faster after reboots, at the cost of airtime. |
 | Route tunnel via mesh repeaters (flood) | off | | Off means zero-hop: repeaters do not re-flood tunnel traffic. Leave it off whenever the peer gateway is in direct radio range. On makes every repeater in the region retransmit tunnel traffic. |

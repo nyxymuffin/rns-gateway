@@ -1,4 +1,10 @@
 #include "MyMesh.h"
+#include "GrpDataTunnelCodec.h"
+#include "SerialLog.h"
+
+static_assert(MeshCoreTunnel::grpdata::kMaxBody == MAX_GROUP_DATA_LENGTH,
+              "GrpDataTunnelCodec.h must track MeshCore.h");
+static_assert(MAX_GROUP_DATA_LENGTH < TUNNEL_TEXT_MAX, "TunnelTx/TunnelRx carry GRP_DATA bodies in text[]");
 
 #define SEND_TIMEOUT_BASE_MILLIS        500
 #define FLOOD_SEND_TIMEOUT_FACTOR       16.0f
@@ -155,6 +161,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packe
 
   TunnelRx rx;
   rx.direct = false;
+  rx.data_len = 0;
   memset(rx.pub_key, 0, sizeof(rx.pub_key));
   rx.timestamp = timestamp;
   StrHelper::strncpy(rx.text, text, sizeof(rx.text));
@@ -165,6 +172,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packe
 void MyMesh::onMessageRecv(const ContactInfo& contact, mesh::Packet* pkt, uint32_t sender_timestamp, const char* text) {
   TunnelRx rx;
   rx.direct = true;
+  rx.data_len = 0;
   memcpy(rx.pub_key, contact.id.pub_key, PUB_KEY_SIZE);
   rx.timestamp = sender_timestamp;
   StrHelper::strncpy(rx.text, text, sizeof(rx.text));
@@ -196,6 +204,7 @@ bool MyMesh::sendChannelText(const char* text, uint32_t timestamp) {
   TunnelTx tx;
   tx.direct = false;
   tx.attempts = 0;
+  tx.data_len = 0;
   memset(tx.pub_key, 0, sizeof(tx.pub_key));
   tx.timestamp = timestamp;
   StrHelper::strncpy(tx.text, text, sizeof(tx.text));
@@ -203,11 +212,50 @@ bool MyMesh::sendChannelText(const char* text, uint32_t timestamp) {
   return true;
 }
 
+bool MyMesh::sendChannelData(const uint8_t* body, size_t len) {
+  if (_tx_queue == NULL || len == 0 || len > MAX_GROUP_DATA_LENGTH) return false;
+  TunnelTx tx;
+  tx.direct = false;
+  tx.attempts = 0;
+  tx.data_len = (uint8_t)len;
+  memset(tx.pub_key, 0, sizeof(tx.pub_key));
+  tx.timestamp = 0;
+  memcpy(tx.text, body, len);
+  if (xQueueSend(_tx_queue, &tx, 0) != pdTRUE) { _tx_dropped++; return false; }
+  return true;
+}
+
+// A GRP_DATA tunnel body on the bridge channel (docs/GRP_DATA_TUNNEL.md).
+// Our own flood echoes never arrive here: Mesh marks sent packets as seen.
+void MyMesh::onChannelDataRecv(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint16_t data_type,
+                               const uint8_t* data, size_t data_len) {
+  if (_bridge_channel == NULL || findChannelIdx(channel) != findChannelIdx(_bridge_channel->channel)) return;
+  if (data_type != (uint16_t)MeshCoreTunnel::grpdata::GrpDataType::RnsTunnel) return;
+  if (data_len == 0 || data_len > MAX_GROUP_DATA_LENGTH) return;
+  TunnelRx rx;
+  rx.direct = false;
+  rx.data_len = (uint8_t)data_len;
+  memset(rx.pub_key, 0, sizeof(rx.pub_key));
+  rx.timestamp = 0;
+  memcpy(rx.text, data, data_len);
+  if (_rx_queue == NULL || xQueueSend(_rx_queue, &rx, 0) != pdTRUE) _rx_dropped++;
+}
+
+// As channelFragAirtimeMs, for a GRP_DATA packet: header + path + channel
+// hash/MAC + ciphertext (data_type, len and body padded to 16-byte blocks).
+uint32_t MyMesh::channelDataAirtimeMs(size_t body_len) {
+  if (!_tunnel_flood) return 0;
+  size_t cipher = ((3 + body_len + 15) / 16) * 16;
+  size_t on_air = 2 + 1 + 3 + cipher;
+  return _radio->getEstAirtimeFor((int)on_air);
+}
+
 bool MyMesh::sendDirectText(const uint8_t* pub_key, const char* text, uint32_t timestamp) {
   if (_tx_queue == NULL) return false;
   TunnelTx tx;
   tx.direct = true;
   tx.attempts = 0;
+  tx.data_len = 0;
   memcpy(tx.pub_key, pub_key, PUB_KEY_SIZE);
   tx.timestamp = timestamp;
   StrHelper::strncpy(tx.text, text, sizeof(tx.text));
@@ -299,6 +347,15 @@ void MyMesh::drainTxQueue() {
 
   if (_bridge_channel == NULL) {
     Serial.printf("[tx] CHANNEL dropped: no bridge channel\n");
+    return;
+  }
+  if (tx.data_len) {
+    // OUT_PATH_UNKNOWN routes through sendFloodScoped(): zero-hop or flood per tunnel_flood.
+    bool ok = sendGroupData(_bridge_channel->channel, NULL, OUT_PATH_UNKNOWN,
+                            (uint16_t)MeshCoreTunnel::grpdata::GrpDataType::RnsTunnel,
+                            (const uint8_t*)tx.text, tx.data_len);
+    slog("[tx] CHANNEL DATA ok=%d len=%u\r\n", ok ? 1 : 0, (unsigned)tx.data_len);
+    if (!ok) retryRefused(tx);
     return;
   }
   noteOwnEcho(tx.text);

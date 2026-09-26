@@ -469,6 +469,8 @@ static void rns_task(void* arg) {
   mccfg.path_req_rate_ms = g_cfg.path_req_rate_s * 1000UL;
   mccfg.announce_rate_ms = g_cfg.announce_rate_s * 1000UL;
   mccfg.air_budget_bytes_h = g_cfg.air_budget_kb_h * 1024UL;
+  mccfg.grp_data = g_cfg.tunnel_format == TUNNEL_FORMAT_DATA;
+  slog("RNS: tunnel format %s\r\n", mccfg.grp_data ? "GRP_DATA (docs/GRP_DATA_TUNNEL.md)" : "text");
 #ifdef RNS_GW_PROP_ONLY
   // Prop-restricted variant: policy is forced on at build time so it cannot
   // be disabled from the portal — restriction is a property of the firmware.
@@ -672,7 +674,9 @@ static void rns_task(void* arg) {
     // Hand the mesh task's received fragments to the tunnel interface.
     TunnelRx rx;
     while (the_mesh.takeReceived(rx)) {
-      if (rx.direct) {
+      if (rx.data_len) {
+        _mc_impl->on_channel_data(reinterpret_cast<const uint8_t*>(rx.text), rx.data_len);
+      } else if (rx.direct) {
         _mc_impl->on_contact_text(rx.pub_key, rx.text, rx.timestamp);
       } else {
         _mc_impl->on_channel_text(rx.text, rx.timestamp);

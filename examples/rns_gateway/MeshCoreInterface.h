@@ -37,6 +37,7 @@
 
 #include "MeshCoreLink.h"
 #include "MeshCoreTunnelCodec.h"
+#include "GrpDataTunnelCodec.h"
 #include "PropPolicy.h"
 
 class MeshCoreInterface : public RNS::InterfaceImpl {
@@ -105,6 +106,14 @@ public:
         // the policy code compiles — and host-tests — in every variant; the
         // RNS_GW_PROP_ONLY build flag just forces it on.
         bool        prop_only = false;
+
+        // ── Tunnel wire format ──────────────────────────────────────────────
+        // false: "RNS:<base64url>" GRP_TXT channel text (the Python reference
+        // format). true: GRP_DATA per docs/GRP_DATA_TUNNEL.md — binary
+        // fragments with a sender prefix, channel only (v1 has no direct leg,
+        // so allow_direct is ignored). A channel carries one format or the
+        // other; each ignores the other's traffic.
+        bool        grp_data = false;
     };
 
     MeshCoreInterface(MeshCoreLink& link, const Config& cfg);
@@ -121,6 +130,8 @@ public:
     void on_contact_text(const uint8_t* pub_key, const char* text, uint32_t timestamp);
     // MeshCore confirmed delivery of the in-flight direct fragment.
     void on_direct_ack(uint32_t ack_code);
+    // A GRP_DATA tunnel body from the bridge channel (grp_data mode only).
+    void on_channel_data(const uint8_t* body, size_t len);
 
     // ── Diagnostics ────────────────────────────────────────────────────────
     uint32_t    rns_tx_packets() const { return _rns_tx_packets; }
@@ -171,7 +182,8 @@ private:
     void on_incoming(const RNS::Bytes& data);
 
     // Outgoing queue element: how a fragment should be sent.
-    enum TxMode { TX_CHANNEL, TX_DIRECT };
+    // TX_CHANNEL_DATA: `frag` holds a binary GRP_DATA body, not text.
+    enum TxMode { TX_CHANNEL, TX_DIRECT, TX_CHANNEL_DATA };
     struct OutFrag { TxMode mode; std::string target_hex; std::string frag; };
 
     // Outgoing worker. With the companion gone there is no RESP_SENT to wait
@@ -194,6 +206,13 @@ private:
     void enqueue_packet(const uint8_t* data, size_t len, uint32_t pkt_id,
                         TxMode mode, const std::string& target_hex);
     void process_tunnel_text(const std::string& text, const std::string& sender);
+    void process_fragment(const MeshCoreTunnel::FragHeader& hdr, std::vector<uint8_t> chunk,
+                          const std::string& sender);
+    void enqueue_packet_data(const uint8_t* data, size_t len);
+    void send_bind_data(bool is_req);
+    // Peer table key for a GRP_DATA node: unique per public key (spec 2.2),
+    // readable in logs. "<name>#<8 hex>" or just the hex when unnamed.
+    static std::string data_peer_label(const std::string& name, const std::string& key_hex);
     void learn_token(const std::string& sender, const std::vector<uint8_t>& full);
     bool rate_limit_ok(const uint8_t* data, size_t len);
     void note_heard_on_mesh(const uint8_t* data, size_t len);

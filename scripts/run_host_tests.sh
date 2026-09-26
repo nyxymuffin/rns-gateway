@@ -29,3 +29,10 @@ c++ -std=c++17 -Wall -Wextra -O0 \
   "${ROOT}/examples/rns_gateway/BleFragmentation.cpp" \
   -o "${OUT}"
 "${OUT}"
+
+OUT="${ROOT}/.pio/host_test_grp_data_codec"
+c++ -std=c++17 -Wall -Wextra -O0 \
+  -I "${ROOT}/examples/rns_gateway" \
+  "${ROOT}/test/host/test_grp_data_codec.cpp" \
+  -o "${OUT}"
+"${OUT}"

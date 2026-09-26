@@ -327,7 +327,22 @@ private:
                               "Channels match by PSK hash, not index.</p>"));
 
         // ── Tunnel policy ───────────────────────────────────────────────────
-        _server.sendContent(F("<h2>Tunnel policy</h2>"));
+        _server.sendContent(F("<h2>Tunnel policy</h2>"
+                              "<label for='tun_format'>Tunnel format</label>"
+                              "<select id='tun_format' name='tun_format' "
+                              "style='width:100%;padding:.45rem;background:#1c1c1c;color:#eee;"
+                              "border:1px solid #444;border-radius:4px'>"));
+        {
+            const bool data = _cfg->tunnel_format == TUNNEL_FORMAT_DATA;
+            _server.sendContent(String(F("<option value='0'")) + (data ? "" : " selected") +
+                                ">Text (RNS: channel messages, Python reference)</option>" +
+                                "<option value='1'" + (data ? " selected" : "") +
+                                ">GRP_DATA (binary, Ratspeak handheld)</option></select>");
+        }
+        _server.sendContent(F("<p class='note'>Every node on the bridge channel must use "
+                              "the same format; each ignores the other. GRP_DATA carries "
+                              "about twice the payload per fragment and has no direct "
+                              "(unicast) leg yet. See docs/GRP_DATA_TUNNEL.md.</p>"));
         number("pr_rate", "Path-request throttle, seconds per destination (0 = off)",
                _cfg->path_req_rate_s, 0, 86400);
         number("ann_rate", "Announce throttle, seconds per destination (0 = off)",
@@ -448,6 +463,10 @@ private:
         if (_server.hasArg("ann_rate")) {
             long v = _server.arg("ann_rate").toInt();
             if (v >= 0 && v <= 86400) c.announce_rate_s = (uint32_t)v;
+        }
+        if (_server.hasArg("tun_format")) {
+            long v = _server.arg("tun_format").toInt();
+            c.tunnel_format = (v == TUNNEL_FORMAT_DATA) ? TUNNEL_FORMAT_DATA : TUNNEL_FORMAT_TEXT;
         }
         if (_server.hasArg("air_kb")) {
             long v = _server.arg("air_kb").toInt();
