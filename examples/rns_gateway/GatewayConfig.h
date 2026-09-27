@@ -128,6 +128,10 @@ struct GatewayConfig {
     // TUNNEL_FORMAT_TEXT (default, the existing format) or TUNNEL_FORMAT_DATA.
     // Takes effect after a reboot, like every tunnel setting.
     uint8_t  tunnel_format;
+    // MeshCore region our floods are sent in. "" or "*" = unscoped (the
+    // wildcard region); a public region name = transport floods for that
+    // region, so region-restricted repeaters forward them.
+    char     flood_scope[31];
 
     // ── MeshCore bridge channel ─────────────────────────────────────────────
     // Index 0 is MeshCore public and takes no private PSK; a private tunnel
@@ -165,6 +169,7 @@ struct GatewayConfig {
         tunnel_flood    = false;
         air_budget_kb_h = 60;   // ~45% of the theoretical 300 bit/s hour
         tunnel_format   = TUNNEL_FORMAT_TEXT;
+        flood_scope[0]  = 0;
 
         strlcpy(chan_name, BRIDGE_CHANNEL_NAME, sizeof(chan_name));
         strlcpy(chan_psk,  BRIDGE_CHANNEL_PSK,  sizeof(chan_psk));
@@ -224,6 +229,7 @@ struct GatewayConfig {
         air_budget_kb_h = doc["air_budget_kb_h"] | air_budget_kb_h;
         tunnel_format   = doc["tunnel_format"]   | tunnel_format;
         if (tunnel_format != TUNNEL_FORMAT_DATA) tunnel_format = TUNNEL_FORMAT_TEXT;
+        strlcpy(flood_scope, doc["flood_scope"] | flood_scope, sizeof(flood_scope));
 
         strlcpy(chan_name, doc["chan_name"] | chan_name, sizeof(chan_name));
         strlcpy(chan_psk,  doc["chan_psk"]  | chan_psk,  sizeof(chan_psk));
@@ -253,6 +259,7 @@ struct GatewayConfig {
         doc["tunnel_flood"] = tunnel_flood;
         doc["air_budget_kb_h"] = air_budget_kb_h;
         doc["tunnel_format"] = tunnel_format;
+        doc["flood_scope"]  = flood_scope;
         doc["chan_name"]    = chan_name;
         doc["chan_psk"]     = chan_psk;
 

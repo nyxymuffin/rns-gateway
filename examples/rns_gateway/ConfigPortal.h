@@ -348,6 +348,7 @@ private:
         number("ann_rate", "Announce throttle, seconds per destination (0 = off)",
                _cfg->announce_rate_s, 0, 86400);
         checkbox("tun_flood", "Route tunnel via mesh repeaters (flood)", _cfg->tunnel_flood);
+        text("flood_scope", "Flood scope (MeshCore region; blank or * = unscoped)", _cfg->flood_scope, 30, false);
         _server.sendContent(F("<p class='note'>Leave OFF when the peer gateway is "
                               "in direct radio range — flood routing makes every "
                               "repeater in the region retransmit tunnel traffic.</p>"));
@@ -441,6 +442,7 @@ private:
         copyArg("chan_name", c.chan_name, sizeof(c.chan_name));
         copyArg("chan_psk",  c.chan_psk,  sizeof(c.chan_psk));
         copyArg("prop_dests", c.prop_dests, sizeof(c.prop_dests));
+        copyArg("flood_scope", c.flood_scope, sizeof(c.flood_scope));
 
         // Node name belongs to MeshCore's prefs: relay `set name` to the mesh
         // task rather than storing it here. Only when it actually changed.

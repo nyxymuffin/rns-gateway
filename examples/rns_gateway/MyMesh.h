@@ -123,6 +123,9 @@ class MyMesh : public BaseChatMesh, public CommonCLICallbacks, public MeshCoreLi
   uint8_t pending_sf;
   uint8_t pending_cr;
   bool _tunnel_flood;                // see setTunnelFlood
+  TransportKey _flood_scope;         // see setFloodScope; key all zero = unscoped
+  bool _flood_scoped;
+  void floodScoped(mesh::Packet* pkt, uint32_t delay_millis);
   ChannelDetails* _bridge_channel;   // the tunnel channel; NULL until joined
   char _chan_name[32];               // seeded from build flags, overridden by config
   char _chan_psk[45];                // base64 of a 16- or 32-byte key
@@ -195,6 +198,13 @@ public:
   // in direct RF range. true = flood-route through repeaters (opt-in; costs
   // the whole region airtime for every fragment).
   void setTunnelFlood(bool use_repeaters) { _tunnel_flood = use_repeaters; }
+
+  // Call before begin(). MeshCore region our floods are sent in: empty or "*"
+  // floods unscoped (the wildcard region); a public region name ("name" or
+  // "#name") sends transport floods for that region, keyed as repeaters and
+  // the companion firmware do. Private "$" regions are not supported (they
+  // need a shared key) and fall back to unscoped.
+  void setFloodScope(const char* name);
 
   void begin(FILESYSTEM* fs);
   void loop();

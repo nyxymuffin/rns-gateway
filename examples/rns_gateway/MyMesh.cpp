@@ -2,6 +2,8 @@
 #include "GrpDataTunnelCodec.h"
 #include "SerialLog.h"
 
+#include <SHA256.h>   // rweather/Crypto: flood-scope region key
+
 static_assert(MeshCoreTunnel::grpdata::kMaxBody == MAX_GROUP_DATA_LENGTH,
               "GrpDataTunnelCodec.h must track MeshCore.h");
 static_assert(MAX_GROUP_DATA_LENGTH < TUNNEL_TEXT_MAX, "TunnelTx/TunnelRx carry GRP_DATA bodies in text[]");
@@ -25,6 +27,8 @@ MyMesh::MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondCloc
   memset(_echo_ring, 0, sizeof(_echo_ring));
   _echo_next = 0;
   _tunnel_flood = false;
+  memset(&_flood_scope, 0, sizeof(_flood_scope));
+  _flood_scoped = false;
   _tx_queue = NULL;
   _rx_queue = NULL;
   _bind_queue = NULL;
@@ -413,12 +417,47 @@ bool MyMesh::isOwnEcho(const char* text) {
   return false;
 }
 
+void MyMesh::setFloodScope(const char* name) {
+  memset(&_flood_scope, 0, sizeof(_flood_scope));
+  _flood_scoped = false;
+  if (name == NULL || name[0] == 0 || strcmp(name, "*") == 0) {
+    slog("[scope] floods unscoped (*)\r\n");
+    return;
+  }
+  if (name[0] == '$' || strcmp(name, "#") == 0 || strlen(name) > 30 || strchr(name, ' ')) {
+    slog("[scope] '%s' not usable (private regions need a key) - floods unscoped\r\n", name);
+    return;
+  }
+  // Key = first 16 bytes of SHA-256("#name"), '#' implied if absent, exactly
+  // as RegionMap::getTransportKeysFor / TransportKeyStore::getAutoKeyFor.
+  char tag[33];
+  snprintf(tag, sizeof(tag), "%s%s", name[0] == '#' ? "" : "#", name);
+  SHA256 sha;
+  sha.update(tag, strlen(tag));
+  sha.finalize(_flood_scope.key, sizeof(_flood_scope.key));
+  _flood_scoped = true;
+  slog("[scope] floods scoped to region '%s'\r\n", name);
+}
+
+// Every flood we originate: transport codes {region, 0} like the companion
+// firmware's sendFloodScoped when a region is set, a plain flood otherwise.
+void MyMesh::floodScoped(mesh::Packet* pkt, uint32_t delay_millis) {
+  if (!_flood_scoped) {
+    sendFlood(pkt, delay_millis, _prefs.path_hash_mode + 1);
+    return;
+  }
+  uint16_t codes[2];
+  codes[0] = _flood_scope.calcTransportCode(pkt);
+  codes[1] = 0;
+  sendFlood(pkt, codes, delay_millis, _prefs.path_hash_mode + 1);
+}
+
 void MyMesh::sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis) {
   if (!_tunnel_flood) {
     sendZeroHop(pkt, delay_millis);
     return;
   }
-  sendFlood(pkt, delay_millis, _prefs.path_hash_mode + 1);
+  floodScoped(pkt, delay_millis);
 }
 
 void MyMesh::sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis) {
@@ -426,7 +465,7 @@ void MyMesh::sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, ui
     sendZeroHop(pkt, delay_millis);
     return;
   }
-  BaseChatMesh::sendFloodScoped(recipient, pkt, delay_millis);
+  floodScoped(pkt, delay_millis);
 }
 
 uint32_t MyMesh::calcFloodTimeoutMillisFor(uint32_t pkt_airtime_millis) const {
@@ -457,7 +496,7 @@ void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
   mesh::Packet* pkt = createSelfAdvert();
   if (pkt) {
     if (flood) {
-      sendFlood(pkt, delay_millis, _prefs.path_hash_mode + 1);
+      floodScoped(pkt, delay_millis);
     } else {
       sendZeroHop(pkt, delay_millis);
     }
@@ -553,7 +592,7 @@ void MyMesh::loop() {
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet* pkt = createSelfAdvert();
-    if (pkt) sendFlood(pkt, (uint32_t)0, _prefs.path_hash_mode + 1);
+    if (pkt) floodScoped(pkt, 0);
     updateFloodAdvertTimer();
     updateAdvertTimer();
   } else if (next_local_advert && millisHasNowPassed(next_local_advert)) {

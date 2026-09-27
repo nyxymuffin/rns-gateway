@@ -755,6 +755,7 @@ void setup() {
   g_cfg.load();
   the_mesh.setBridgeChannel(g_cfg.chan_name, g_cfg.chan_psk);
   the_mesh.setTunnelFlood(g_cfg.tunnel_flood);
+  the_mesh.setFloodScope(g_cfg.flood_scope);
 
   // One-shot setup session requested by the previous boot (PRG hold, or a
   // BLE start failure). Consumed here so the boot after it is normal again.
