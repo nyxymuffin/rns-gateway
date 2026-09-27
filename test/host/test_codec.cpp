@@ -302,7 +302,25 @@ static void test_packet_hash_preimage() {
     CHECK(a.size() == 1 + (sizeof(d2) - 18), "two-byte skips first address");
 }
 
+static void test_add_mesh_hops() {
+    uint8_t p[40];
+    std::memset(p, 0, sizeof(p));
+    p[0] = 0x01;   // ANNOUNCE
+    p[1] = 2;      // two Reticulum hops so far
+    MeshCoreTunnel::add_mesh_hops(p, sizeof(p), 7);
+    CHECK(p[1] == 9, "mesh hops added to the hop byte");
+    MeshCoreTunnel::add_mesh_hops(p, sizeof(p), 0);
+    CHECK(p[1] == 9, "zero hops leaves it alone");
+    p[1] = 100;
+    MeshCoreTunnel::add_mesh_hops(p, sizeof(p), 64);
+    CHECK(p[1] == MeshCoreTunnel::RNS_MAX_HOPS_BEFORE_INGEST, "clamped at 126, never wrapped");
+    uint8_t runt[1] = {0};
+    MeshCoreTunnel::add_mesh_hops(runt, 1, 5);
+    CHECK(runt[0] == 0, "runt untouched");
+}
+
 int main() {
+    test_add_mesh_hops();
     test_b64url_roundtrip();
     test_b64url_known_vector();
     test_fragment_roundtrip();

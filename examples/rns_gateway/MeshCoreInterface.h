@@ -125,13 +125,14 @@ public:
 
     // ── Inbound, called from the MeshCore task via the role class ──────────
     // 'text' is a whole channel message, still in "<sender>: <body>" form.
-    void on_channel_text(const char* text, uint32_t timestamp);
+    // hops: MeshCore repeaters the message crossed; added to the RNS hop count.
+    void on_channel_text(const char* text, uint32_t timestamp, uint8_t hops = 0);
     // A direct (contact) message carrying a tunnel fragment.
     void on_contact_text(const uint8_t* pub_key, const char* text, uint32_t timestamp);
     // MeshCore confirmed delivery of the in-flight direct fragment.
     void on_direct_ack(uint32_t ack_code);
     // A GRP_DATA tunnel body from the bridge channel (grp_data mode only).
-    void on_channel_data(const uint8_t* body, size_t len);
+    void on_channel_data(const uint8_t* body, size_t len, uint8_t hops = 0);
 
     // ── Diagnostics ────────────────────────────────────────────────────────
     uint32_t    rns_tx_packets() const { return _rns_tx_packets; }
@@ -205,9 +206,9 @@ private:
 
     void enqueue_packet(const uint8_t* data, size_t len, uint32_t pkt_id,
                         TxMode mode, const std::string& target_hex);
-    void process_tunnel_text(const std::string& text, const std::string& sender);
+    void process_tunnel_text(const std::string& text, const std::string& sender, uint8_t hops = 0);
     void process_fragment(const MeshCoreTunnel::FragHeader& hdr, std::vector<uint8_t> chunk,
-                          const std::string& sender);
+                          const std::string& sender, uint8_t hops = 0);
     void enqueue_packet_data(const uint8_t* data, size_t len);
     void send_bind_data(bool is_req);
     // Peer table key for a GRP_DATA node: unique per public key (spec 2.2),
@@ -245,7 +246,8 @@ private:
     uint8_t           _cur_attempt = 0;      // DIRECT attempts made for _cur
     bool              _echo_gap_logged = false;
 
-    struct Asm { uint8_t total; uint32_t ts; std::map<uint8_t, std::vector<uint8_t>> frags; };
+    // hops: most MeshCore repeaters any held fragment crossed.
+    struct Asm { uint8_t total; uint32_t ts; std::map<uint8_t, std::vector<uint8_t>> frags; uint8_t hops = 0; };
     std::map<std::string, Asm> _assembly;
     std::map<std::string, uint32_t> _seen;
     std::map<std::string, uint32_t> _announce_sent;

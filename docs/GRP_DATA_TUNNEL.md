@@ -103,7 +103,20 @@ published under a **new `data_type` value**; version 1 receivers then
 ignore it (section 1). New message kinds may be added under the same
 `data_type` because unknown kinds are dropped.
 
-## 4. Not in version 1
+## 4. Receiver behaviour: MeshCore hops count as Reticulum hops
+
+Reticulum sizes link-establishment and packet-receipt timeouts at 6 s per hop
+from a path's hop count (RNS `Link.py`, `Packet.py`), but the tunnel is one
+Reticulum hop however many MeshCore repeaters it spans. A receiver therefore
+adds the MeshCore hops a packet crossed (the flood path's hash count, the
+highest across the packet's fragments; 0 when heard directly) to the RNS hop
+byte (byte 1) before handing the packet to Reticulum, clamped at 126 because
+Reticulum drops packets over 127 after its own +1 (`PATHFINDER_M` = 128).
+The hop byte is outside the packet hash, so no hash or signature changes.
+This is local behaviour, not wire format, but both implementations do it so
+timeouts cover the distance in both directions.
+
+## 5. Not in version 1
 
 - **Direct (unicast) leg.** Everything is sent on the channel. How unicast
   RNS traffic is carried (MeshCore `TXT_MSG`, `REQ`/`RESPONSE`, or
@@ -111,7 +124,7 @@ ignore it (section 1). New message kinds may be added under the same
 - Airtime policy (announce and path-request throttles, hourly budget) is
   local to each implementation and not part of the wire format.
 
-## 5. Example
+## 6. Example
 
 A Bind request from a node whose public key begins `3a 7c 01 e9 …`, edge
 role, named `Nyx T-Pager` (11 bytes):

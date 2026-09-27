@@ -156,6 +156,12 @@ void MyMesh::begin(FILESYSTEM* fs) {
   _bind_queue = xQueueCreate(TUNNEL_QUEUE_DEPTH, sizeof(TunnelBind));
 }
 
+// How many repeaters a received packet crossed: a flood carries one path hash
+// per hop (MeshCore spec section 3); zero-hop and DIRECT packets report 0.
+static uint8_t floodHops(const mesh::Packet* pkt) {
+  return (pkt != NULL && pkt->isRouteFlood()) ? pkt->getPathHashCount() : 0;
+}
+
 // A tunnel fragment arrived on the bridge channel. 'text' is still in
 // MeshCore's "<sender>: <body>" form; the interface parses it, exactly as it
 // did when the companion protocol delivered the same string.
@@ -166,6 +172,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel& channel, mesh::Packe
   TunnelRx rx;
   rx.direct = false;
   rx.data_len = 0;
+  rx.hops = floodHops(pkt);
   memset(rx.pub_key, 0, sizeof(rx.pub_key));
   rx.timestamp = timestamp;
   StrHelper::strncpy(rx.text, text, sizeof(rx.text));
@@ -177,6 +184,7 @@ void MyMesh::onMessageRecv(const ContactInfo& contact, mesh::Packet* pkt, uint32
   TunnelRx rx;
   rx.direct = true;
   rx.data_len = 0;
+  rx.hops = 0;   // DIRECT: the path was consumed on the way
   memcpy(rx.pub_key, contact.id.pub_key, PUB_KEY_SIZE);
   rx.timestamp = sender_timestamp;
   StrHelper::strncpy(rx.text, text, sizeof(rx.text));
@@ -239,6 +247,7 @@ void MyMesh::onChannelDataRecv(const mesh::GroupChannel& channel, mesh::Packet* 
   TunnelRx rx;
   rx.direct = false;
   rx.data_len = (uint8_t)data_len;
+  rx.hops = floodHops(pkt);
   memset(rx.pub_key, 0, sizeof(rx.pub_key));
   rx.timestamp = 0;
   memcpy(rx.text, data, data_len);

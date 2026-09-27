@@ -155,6 +155,17 @@ bool is_broadcast_packet(const uint8_t* data, size_t len);
 bool extract_path_request_target(const uint8_t* data, size_t len,
                                  uint8_t out[RNS_DST_LEN]);
 
+// Reticulum drops a packet whose hop count exceeds 127 after the receiving
+// transport's own +1 (RNS Transport.py PATHFINDER_M = 128), so at most 126 in.
+static constexpr uint8_t RNS_MAX_HOPS_BEFORE_INGEST = 126;
+
+// Adds the MeshCore hops a tunnelled packet crossed to its Reticulum hop count
+// (byte 1). Reticulum sizes link and receipt timeouts at 6 s per hop from that
+// count but sees the whole tunnel as one hop however many repeaters it spans.
+// The hop byte is outside the packet hash, so no hash or signature changes.
+// Clamped, never wrapped. Same rule as the Ratspeak handheld (docs/GRP_DATA_TUNNEL.md).
+void add_mesh_hops(uint8_t* data, size_t len, uint8_t mesh_hops);
+
 } // namespace MeshCoreTunnel
 
 #endif

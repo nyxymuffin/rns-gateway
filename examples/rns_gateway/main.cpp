@@ -675,11 +675,11 @@ static void rns_task(void* arg) {
     TunnelRx rx;
     while (the_mesh.takeReceived(rx)) {
       if (rx.data_len) {
-        _mc_impl->on_channel_data(reinterpret_cast<const uint8_t*>(rx.text), rx.data_len);
+        _mc_impl->on_channel_data(reinterpret_cast<const uint8_t*>(rx.text), rx.data_len, rx.hops);
       } else if (rx.direct) {
         _mc_impl->on_contact_text(rx.pub_key, rx.text, rx.timestamp);
       } else {
-        _mc_impl->on_channel_text(rx.text, rx.timestamp);
+        _mc_impl->on_channel_text(rx.text, rx.timestamp, rx.hops);
       }
     }
     while (the_mesh.takeAck()) {

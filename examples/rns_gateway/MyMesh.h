@@ -86,9 +86,12 @@ struct TunnelTx {
   char     text[TUNNEL_TEXT_MAX];
 };
 
+// hops: MeshCore repeaters the packet crossed (flood path length; 0 when heard
+// directly or delivered DIRECT), added to the RNS hop count on reassembly.
 struct TunnelRx {
   bool     direct;
   uint8_t  data_len;
+  uint8_t  hops;                     // MeshCore repeaters crossed (flood path length; 0 direct)
   uint8_t  pub_key[PUB_KEY_SIZE];
   uint32_t timestamp;
   char     text[TUNNEL_TEXT_MAX];

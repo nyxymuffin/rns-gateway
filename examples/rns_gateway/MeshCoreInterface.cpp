@@ -49,7 +49,7 @@ MeshCoreInterface::MeshCoreInterface(MeshCoreLink& link, const Config& cfg)
 MeshCoreInterface::~MeshCoreInterface() {}
 
 bool MeshCoreInterface::start() {
-    // GRP_DATA v1 is channel-only (docs/GRP_DATA_TUNNEL.md section 4).
+    // GRP_DATA v1 is channel-only (docs/GRP_DATA_TUNNEL.md section 5).
     if (_cfg.grp_data) _cfg.allow_direct = false;
 
     const char* pk = _link.selfPubKeyHex();
@@ -510,7 +510,7 @@ std::string MeshCoreInterface::data_peer_label(const std::string& name, const st
     return name.empty() ? prefix : name + "#" + prefix;
 }
 
-void MeshCoreInterface::on_channel_data(const uint8_t* body, size_t len) {
+void MeshCoreInterface::on_channel_data(const uint8_t* body, size_t len, uint8_t hops) {
     if (!_cfg.grp_data) return;   // this channel carries the text format
     using namespace MeshCoreTunnel::grpdata;
     Kind kind;
@@ -532,7 +532,7 @@ void MeshCoreInterface::on_channel_data(const uint8_t* body, size_t len) {
         hdr.frag_idx = f.index;
         hdr.pkt_id = f.packetId;
         hdr.frag_total = f.total;
-        process_fragment(hdr, std::vector<uint8_t>(f.payload, f.payload + f.payloadLength), sender);
+        process_fragment(hdr, std::vector<uint8_t>(f.payload, f.payload + f.payloadLength), sender, hops);
         return;
     }
     Bind bind;
@@ -548,7 +548,7 @@ void MeshCoreInterface::on_channel_data(const uint8_t* body, size_t len) {
     handle_bind(b, millis());
 }
 
-void MeshCoreInterface::on_channel_text(const char* text_c, uint32_t timestamp) {
+void MeshCoreInterface::on_channel_text(const char* text_c, uint32_t timestamp, uint8_t hops) {
     if (_cfg.grp_data) return;    // this channel carries the GRP_DATA format
     std::string text(text_c);
 
@@ -585,7 +585,7 @@ void MeshCoreInterface::on_channel_text(const char* text_c, uint32_t timestamp) 
         while (!sender.empty() && (sender.back() == ' ' || sender.back() == ':'))
             sender.pop_back();
     }
-    process_tunnel_text(text.substr(rns_idx), sender);
+    process_tunnel_text(text.substr(rns_idx), sender, hops);
 }
 
 void MeshCoreInterface::on_contact_text(const uint8_t* pub_key, const char* text_c, uint32_t timestamp) {
@@ -619,7 +619,7 @@ void MeshCoreInterface::on_direct_ack(uint32_t ack_code) {
     if (_tx_state == TXS_AWAIT_ACK) _got_ack = true;
 }
 
-void MeshCoreInterface::process_tunnel_text(const std::string& text, const std::string& sender) {
+void MeshCoreInterface::process_tunnel_text(const std::string& text, const std::string& sender, uint8_t hops) {
     MeshCoreTunnel::FragHeader hdr;
     std::vector<uint8_t> chunk;
     if (!MeshCoreTunnel::decode_channel_fragment(text, hdr, chunk)) {
@@ -627,14 +627,14 @@ void MeshCoreInterface::process_tunnel_text(const std::string& text, const std::
                  sender.c_str(), (unsigned)text.size());
         return;
     }
-    process_fragment(hdr, std::move(chunk), sender);
+    process_fragment(hdr, std::move(chunk), sender, hops);
 }
 
 // Reassembly shared by both tunnel formats: text fragments and GRP_DATA
 // fragments (docs/GRP_DATA_TUNNEL.md 2.1) are keyed by sender + pkt_id alike.
 void MeshCoreInterface::process_fragment(const MeshCoreTunnel::FragHeader& hdr,
                                          std::vector<uint8_t> chunk,
-                                         const std::string& sender) {
+                                         const std::string& sender, uint8_t hops) {
     std::string key = sender;
     key.push_back('\0');
     key.append(reinterpret_cast<const char*>(&hdr.pkt_id), sizeof(hdr.pkt_id));
@@ -653,6 +653,7 @@ void MeshCoreInterface::process_fragment(const MeshCoreTunnel::FragHeader& hdr,
     }
 
     Asm& a = _assembly[key];
+    if (hops > a.hops) a.hops = hops;
     if (a.frags.empty()) a.total = hdr.frag_total;
     a.ts = now;
     if (a.frags.count(hdr.frag_idx)) return;
@@ -690,6 +691,7 @@ void MeshCoreInterface::process_fragment(const MeshCoreTunnel::FragHeader& hdr,
             }
             if (!overlap || !same) continue;
             size_t before = a.frags.size();
+            if (other.hops > a.hops) a.hops = other.hops;
             for (const auto& f : other.frags)
                 if (!a.frags.count(f.first)) a.frags[f.first] = f.second;
             if (a.frags.size() > before) {
@@ -708,6 +710,7 @@ void MeshCoreInterface::process_fragment(const MeshCoreTunnel::FragHeader& hdr,
         if (it == a.frags.end()) { _assembly.erase(key); return; }
         full.insert(full.end(), it->second.begin(), it->second.end());
     }
+    const uint8_t mesh_hops = a.hops;
     _assembly.erase(key);
     _seen[key] = now + _cfg.dedup_ttl_ms;
 
@@ -732,12 +735,17 @@ void MeshCoreInterface::process_fragment(const MeshCoreTunnel::FragHeader& hdr,
         }
     }
 
+    // The tunnel is one Reticulum hop however many MeshCore repeaters it
+    // crossed; count those so Reticulum's per-hop timeouts (6 s each) cover
+    // the real distance. Same rule as the Ratspeak handheld.
+    MeshCoreTunnel::add_mesh_hops(full.data(), full.size(), mesh_hops);
+
     RNS::Bytes out(full.data(), full.size());
     _rns_rx_packets++;
-    INFOF("MeshCoreInterface: reassembled %s %u bytes (%s/%s) from '%s'",
+    INFOF("MeshCoreInterface: reassembled %s %u bytes (%s/%s) from '%s' over %u mesh hops",
           MeshCoreTunnel::packet_kind(full[0]), (unsigned)full.size(),
           MeshCoreTunnel::ptype_name(ptype), MeshCoreTunnel::dtype_name(dtype),
-          sender.c_str());
+          sender.c_str(), (unsigned)mesh_hops);
     on_incoming(out);
 }
 

@@ -257,4 +257,10 @@ bool is_broadcast_packet(const uint8_t* data, size_t len) {
     return false;
 }
 
+void add_mesh_hops(uint8_t* data, size_t len, uint8_t mesh_hops) {
+    if (data == nullptr || len < 2 || mesh_hops == 0) return;
+    unsigned total = unsigned(data[1]) + mesh_hops;
+    data[1] = (uint8_t)(total > RNS_MAX_HOPS_BEFORE_INGEST ? RNS_MAX_HOPS_BEFORE_INGEST : total);
+}
+
 } // namespace MeshCoreTunnel

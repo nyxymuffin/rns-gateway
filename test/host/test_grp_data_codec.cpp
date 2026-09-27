@@ -1,5 +1,5 @@
 // Host golden tests for examples/rns_gateway/GrpDataTunnelCodec.h against the
-// normative spec docs/GRP_DATA_TUNNEL.md. The example in spec section 5 is
+// normative spec docs/GRP_DATA_TUNNEL.md. The example in spec section 6 is
 // reproduced byte for byte; the Ratspeak handheld runs the same vectors.
 // Run:  ./scripts/run_host_tests.sh
 
@@ -45,7 +45,7 @@ static void bindRequestMatchesSpecExample() {
 
     uint8_t body[kMaxBody];
     const size_t length = encodeBind(bind, body, sizeof(body));
-    CHECK(length == 46);                                   // spec 5: body length 46
+    CHECK(length == 46);                                   // spec 6: body length 46
     CHECK(body[0] == 0x03);
     CHECK(memcmp(body + 1, kSender, 4) == 0);
     CHECK(body[33] == 0x00);
@@ -83,7 +83,7 @@ static void fragmentRoundTripMatchesSpecExample() {
     uint8_t packet[500];
     for (size_t i = 0; i < sizeof(packet); ++i) packet[i] = uint8_t(i * 7);
     uint8_t body[kMaxBody];
-    // Spec 5: second fragment of a 500-byte packet, pkt_id 0x0badf00d.
+    // Spec 6: second fragment of a 500-byte packet, pkt_id 0x0badf00d.
     const size_t length = encodeFragment(kSender, 0x0badf00d, 1, packet, sizeof(packet), body, sizeof(body));
     CHECK(length == 11 + 154);
     const uint8_t header[11] = {0x01, 0x3a, 0x7c, 0x01, 0xe9, 0x0b, 0xad, 0xf0, 0x0d, 0x01, 0x04};
